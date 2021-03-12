@@ -1,7 +1,9 @@
 use std::net;
+use std::io;
 use fixed::types::extra::U7;
 use fixed::FixedU64;
 pub use consensus_encode::{Error, Decodable, Encodable, deserialize, deserialize_partial, serialize, serialize_hex, MAX_VEC_SIZE};
+use consensus_encode::impl_consensus_encoding;
 
 /// Currencies that protocol aware of, there can be currencies that will never be implemented but
 /// index in protocol is known.
@@ -21,6 +23,46 @@ pub enum Currency {
     TCpr,
     Dash,
     TDash,
+}
+
+macro_rules! impl_pure_encodable{
+    ($ty:ident, $meth_dec:ident, $meth_enc:ident) => (
+        impl Decodable for $ty {
+            #[inline]
+            fn consensus_decode<D: io::Read>(d: D) -> Result<Self, Error> {
+                Ok($ty::$meth_dec(Decodable::consensus_decode(d)?))
+            }
+        }
+        impl Encodable for $ty {
+            #[inline]
+            fn consensus_encode<S: io::Write>(
+                &self,
+                s: S,
+            ) -> Result<usize, io::Error> {
+                Encodable::consensus_encode(&self.$meth_enc(), s)
+            }
+        }
+    )
+}
+
+macro_rules! impl_option_encodable{
+    ($ty:ident, $meth_dec:ident, $meth_enc:ident, $err:literal) => (
+        impl Decodable for $ty {
+            #[inline]
+            fn consensus_decode<D: io::Read>(d: D) -> Result<Self, Error> {
+                $ty::$meth_dec(Decodable::consensus_decode(d)?).ok_or(Error::ParseFailed($err))
+            }
+        }
+        impl Encodable for $ty {
+            #[inline]
+            fn consensus_encode<S: io::Write>(
+                &self,
+                s: S,
+            ) -> Result<usize, io::Error> {
+                Encodable::consensus_encode(&self.$meth_enc(), s)
+            }
+        }
+    )
 }
 
 impl Currency {
@@ -63,6 +105,8 @@ impl Currency {
         }
     }
 }
+impl_option_encodable!(Currency, from_index, to_index, "Unknown currency");
+
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Fiat {
@@ -89,12 +133,39 @@ impl Fiat {
         }
     }
 }
+impl_option_encodable!(Fiat, from_index, to_index, "Unknown fiat");
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Address {
     AddressIpv4(net::SocketAddrV4),
     AddressIpv6(net::SocketAddrV6),
 }
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Version {
+    major: u16, // used only 10 bits
+    minor: u16,
+    patch: u16,
+}
+
+impl Version {
+    /// Pack version as 32 bit word with 10 bits per component and 2 reserved bits.
+    pub fn pack(&self) -> u32 {
+        (((self.major & 0b000001111111111) as u32) <<  2) +
+        (((self.minor & 0b000001111111111) as u32) << 12) +
+        (((self.patch & 0b000001111111111) as u32) << 22)
+    }
+
+    /// Unpack version from 32 bit word with 10 bits per component and 2 reserved bits.
+    pub fn unpack(w: u32) -> Self {
+        Version {
+            major: ((w >>  2) & 0b000001111111111) as u16,
+            minor: ((w >> 12) & 0b000001111111111) as u16,
+            patch: ((w >> 22) & 0b000001111111111) as u16,
+        }
+    }
+}
+impl_pure_encodable!(Version, unpack, pack);
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Message {
@@ -138,37 +209,13 @@ impl Message {
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Version {
-    major: u16, // used only 10 bits
-    minor: u16,
-    patch: u16,
-}
-
-impl Version {
-    /// Pack version as 32 bit word with 10 bits per component and 2 reserved bits.
-    pub fn pack(&self) -> u32 {
-        (((self.major & 0b000001111111111) as u32) <<  2) +
-        (((self.minor & 0b000001111111111) as u32) << 12) +
-        (((self.patch & 0b000001111111111) as u32) << 22)
-    }
-
-    /// Unpack version from 32 bit word with 10 bits per component and 2 reserved bits.
-    pub fn unpack(w: u32) -> Self {
-        Version {
-            major: ((w >>  2) & 0b000001111111111) as u16,
-            minor: ((w >> 12) & 0b000001111111111) as u16,
-            patch: ((w >> 22) & 0b000001111111111) as u16,
-        }
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ScanBlock {
     currency: Currency,
     version: Version,
     scan_height: u64,
     height: u64,
 }
+impl_consensus_encoding!(ScanBlock, currency, version, scan_height, height);
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct VersionMessage {
