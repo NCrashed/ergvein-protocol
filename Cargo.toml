@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 fixed = "^1.6"
+consensus-encode = { git = "https://github.com/NCrashed/consensus-encode" }

@@ -1,5 +1,7 @@
 use std::net;
-use fixed::{types::extra::U7, FixedU64};
+use fixed::types::extra::U7;
+use fixed::FixedU64;
+pub use consensus_encode::{Error, Decodable, Encodable, deserialize, deserialize_partial, serialize, serialize_hex, MAX_VEC_SIZE};
 
 /// Currencies that protocol aware of, there can be currencies that will never be implemented but
 /// index in protocol is known.
@@ -142,6 +144,24 @@ pub struct Version {
     patch: u16,
 }
 
+impl Version {
+    /// Pack version as 32 bit word with 10 bits per component and 2 reserved bits.
+    pub fn pack(&self) -> u32 {
+        (((self.major & 0b000001111111111) as u32) <<  2) +
+        (((self.minor & 0b000001111111111) as u32) << 12) +
+        (((self.patch & 0b000001111111111) as u32) << 22)
+    }
+
+    /// Unpack version from 32 bit word with 10 bits per component and 2 reserved bits.
+    pub fn unpack(w: u32) -> Self {
+        Version {
+            major: ((w >>  2) & 0b000001111111111) as u16,
+            minor: ((w >> 12) & 0b000001111111111) as u16,
+            patch: ((w >> 22) & 0b000001111111111) as u16,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ScanBlock {
     currency: Currency,
@@ -236,4 +256,23 @@ pub struct RateReq {
 pub struct RateResp {
     currency: Currency,
     rates: Vec<(Fiat, FixedU64<U7>)>
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn version_test_1() {
+        let ver = Version { major: 1, minor: 2, patch: 4 };
+        assert_eq!(ver.pack(), 0b0000000100_0000000010_0000000001_00);
+        assert_eq!(Version::unpack(0b0000000100_0000000010_0000000001_00), ver);
+    }
+
+    #[test]
+    fn version_test_2() {
+        let ver = Version { major: 2, minor: 0, patch: 0 };
+        assert_eq!(ver.pack(), 0b0000000000_0000000000_0000000010_00);
+        assert_eq!(Version::unpack(0b0000000000_0000000000_0000000010_00), ver);
+    }
 }
