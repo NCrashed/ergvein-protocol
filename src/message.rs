@@ -5,26 +5,6 @@ use fixed::FixedU64;
 pub use consensus_encode::{Error, Decodable, Encodable, deserialize, deserialize_partial, serialize, serialize_hex, MAX_VEC_SIZE};
 use consensus_encode::impl_consensus_encoding;
 
-/// Currencies that protocol aware of, there can be currencies that will never be implemented but
-/// index in protocol is known.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Currency {
-    Btc,
-    TBtc,
-    Ergo,
-    TErgo,
-    UsdtOmni,
-    TUsdtOmni,
-    Ltc,
-    TLtc,
-    Zec,
-    TZec,
-    Cpr,
-    TCpr,
-    Dash,
-    TDash,
-}
-
 macro_rules! impl_pure_encodable{
     ($ty:ident, $meth_dec:ident, $meth_enc:ident) => (
         impl Decodable for $ty {
@@ -63,6 +43,26 @@ macro_rules! impl_option_encodable{
             }
         }
     )
+}
+
+/// Currencies that protocol aware of, there can be currencies that will never be implemented but
+/// index in protocol is known.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Currency {
+    Btc,
+    TBtc,
+    Ergo,
+    TErgo,
+    UsdtOmni,
+    TUsdtOmni,
+    Ltc,
+    TLtc,
+    Zec,
+    TZec,
+    Cpr,
+    TCpr,
+    Dash,
+    TDash,
 }
 
 impl Currency {
@@ -137,8 +137,60 @@ impl_option_encodable!(Fiat, from_index, to_index, "Unknown fiat");
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Address {
-    AddressIpv4(net::SocketAddrV4),
-    AddressIpv6(net::SocketAddrV6),
+    Ipv4(net::SocketAddrV4),
+    Ipv6(net::SocketAddrV6),
+}
+
+fn ipv6_to_be(addr: [u16; 8]) -> [u16; 8] {
+    [addr[0].to_be(), addr[1].to_be(), addr[2].to_be(), addr[3].to_be(),
+     addr[4].to_be(), addr[5].to_be(), addr[6].to_be(), addr[7].to_be()]
+}
+
+impl Decodable for Address {
+    #[inline]
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<Self, Error> {
+        let t: u8 = Decodable::consensus_decode(&mut d)?;
+        let p: u16 = Decodable::consensus_decode(&mut d)?;
+        match t {
+            0 => {
+                let b: [u8; 4] = Decodable::consensus_decode(d)?;
+                let ip = net::Ipv4Addr::new(b[0], b[1], b[2], b[3]);
+                let addr = net::SocketAddrV4::new(ip, p);
+                Ok(Address::Ipv4(addr))
+            }
+            1 => {
+                let b: [u16; 8] = ipv6_to_be(Decodable::consensus_decode(d)?);
+                let ip = net::Ipv6Addr::new(b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
+                let addr = net::SocketAddrV6::new(ip, p, 0, 0);
+                Ok(Address::Ipv6(addr))
+            }
+            _ => Err(Error::ParseFailed("Unknown address type")),
+        }
+    }
+}
+impl Encodable for Address {
+    #[inline]
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S,
+    ) -> Result<usize, io::Error> {
+        match self {
+            Address::Ipv4(sock) => {
+                let t: u8 = 0;
+                let l = Encodable::consensus_encode(&t, &mut s)?
+                    + Encodable::consensus_encode(&sock.port(), &mut s)?
+                    + Encodable::consensus_encode(&sock.ip().octets(), s)?;
+                Ok(l)
+            },
+            Address::Ipv6(sock) => {
+                let t: u8 = 1;
+                let l = Encodable::consensus_encode(&t, &mut s)?
+                    + Encodable::consensus_encode(&sock.port(), &mut s)?
+                    + Encodable::consensus_encode(&sock.ip().octets(), s)?;
+                Ok(l)
+            }
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -321,5 +373,21 @@ mod test {
         let ver = Version { major: 2, minor: 0, patch: 0 };
         assert_eq!(ver.pack(), 0b0000000000_0000000000_0000000010_00);
         assert_eq!(Version::unpack(0b0000000000_0000000000_0000000010_00), ver);
+    }
+
+    #[test]
+    fn address_test_v4() {
+        let addr = Address::Ipv4(net::SocketAddrV4::new(net::Ipv4Addr::new(127, 0, 0, 1), 4142));
+        let bytes = vec![0, 0x2E, 0x10, 127, 0, 0, 1];
+        assert_eq!(serialize(&addr), bytes);
+        assert_eq!(deserialize::<Address>(&bytes).unwrap(), addr);
+    }
+
+    #[test]
+    fn address_test_v6() {
+        let addr = Address::Ipv6(net::SocketAddrV6::new(net::Ipv6Addr::new(0x2001, 0x0db8, 0x85a3, 0x0000, 0x0000, 0x8a2e, 0x0370, 0x7334), 4142, 0, 0));
+        let bytes = vec![1, 0x2E, 0x10, 0x20, 0x01, 0x0d, 0xb8, 0x85, 0xa3, 0x00, 0x00, 0x00, 0x00, 0x8a, 0x2e, 0x03, 0x70, 0x73, 0x34];
+        assert_eq!(serialize(&addr), bytes);
+        assert_eq!(deserialize::<Address>(&bytes).unwrap(), addr);
     }
 }
