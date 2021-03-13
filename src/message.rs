@@ -1,8 +1,7 @@
 use std::{net, io, mem};
 use fixed::types::extra::U7;
 use fixed::FixedU64;
-pub use consensus_encode::{Error, Decodable, Encodable, deserialize, deserialize_partial, serialize, serialize_hex, MAX_VEC_SIZE};
-use consensus_encode::impl_consensus_encoding;
+pub use consensus_encode::{Error, Decodable, Encodable, deserialize, deserialize_partial, serialize, serialize_hex, MAX_VEC_SIZE, VarInt};
 
 macro_rules! impl_pure_encodable{
     ($ty:ident, $meth_dec:ident, $meth_enc:ident) => (
@@ -50,7 +49,7 @@ struct LengthVec<T>(Vec<T>);
 impl<T: Decodable> Decodable for LengthVec<T> {
     #[inline]
     fn consensus_decode<D: io::Read>(mut d: D) -> Result<Self, Error> {
-        let len = u32::consensus_decode(&mut d)?;
+        let len = VarInt::consensus_decode(&mut d)?.0;
         let byte_size = (len as usize)
                             .checked_mul(mem::size_of::<T>())
                             .ok_or(Error::ParseFailed("Invalid length"))?;
@@ -74,7 +73,7 @@ impl<'a, T: Encodable> Encodable for LengthVecRef<'a, T> {
         mut s: S,
     ) -> Result<usize, io::Error> {
         let mut len = 0;
-        len += (self.0.len() as u32).consensus_encode(&mut s)?;
+        len += VarInt(self.0.len() as u64).consensus_encode(&mut s)?;
         for c in self.0.iter() {
             len += c.consensus_encode(&mut s)?;
         }
@@ -141,8 +140,16 @@ impl Currency {
             _ => None,
         }
     }
+
+    fn pack(&self) -> VarInt {
+        VarInt(self.to_index() as u64)
+    }
+
+    fn unpack(i: VarInt) -> Option<Self> {
+        Currency::from_index(i.0 as u32)
+    }
 }
-impl_option_encodable!(Currency, from_index, to_index, "Unknown currency");
+impl_option_encodable!(Currency, unpack, pack, "Unknown currency");
 
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -169,13 +176,22 @@ impl Fiat {
             _ => None,
         }
     }
+
+    fn pack(&self) -> VarInt {
+        VarInt(self.to_index() as u64)
+    }
+
+    fn unpack(i: VarInt) -> Option<Self> {
+        Fiat::from_index(i.0 as u32)
+    }
 }
-impl_option_encodable!(Fiat, from_index, to_index, "Unknown fiat");
+impl_option_encodable!(Fiat, unpack, pack, "Unknown fiat");
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Address {
     Ipv4(net::SocketAddrV4),
     Ipv6(net::SocketAddrV6),
+    OnionV3([u8; 56], u16),
 }
 
 fn ipv6_to_be(addr: [u16; 8]) -> [u16; 8] {
@@ -187,19 +203,26 @@ impl Decodable for Address {
     #[inline]
     fn consensus_decode<D: io::Read>(mut d: D) -> Result<Self, Error> {
         let t: u8 = Decodable::consensus_decode(&mut d)?;
-        let p: u16 = Decodable::consensus_decode(&mut d)?;
         match t {
             0 => {
-                let b: [u8; 4] = Decodable::consensus_decode(d)?;
+                let b: [u8; 4] = Decodable::consensus_decode(&mut d)?;
+                let p: u16 = Decodable::consensus_decode(&mut d)?;
                 let ip = net::Ipv4Addr::new(b[0], b[1], b[2], b[3]);
                 let addr = net::SocketAddrV4::new(ip, p);
                 Ok(Address::Ipv4(addr))
             }
             1 => {
-                let b: [u16; 8] = ipv6_to_be(Decodable::consensus_decode(d)?);
+                let b: [u16; 8] = ipv6_to_be(Decodable::consensus_decode(&mut d)?);
+                let p: u16 = Decodable::consensus_decode(&mut d)?;
                 let ip = net::Ipv6Addr::new(b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
                 let addr = net::SocketAddrV6::new(ip, p, 0, 0);
                 Ok(Address::Ipv6(addr))
+            }
+            2 => {
+                let mut b = [0; 56];
+                d.read_exact(&mut b)?;
+                let p: u16 = Decodable::consensus_decode(&mut d)?;
+                Ok(Address::OnionV3(b, p))
             }
             _ => Err(Error::ParseFailed("Unknown address type")),
         }
@@ -215,15 +238,22 @@ impl Encodable for Address {
             Address::Ipv4(sock) => {
                 let t: u8 = 0;
                 let l = Encodable::consensus_encode(&t, &mut s)?
-                    + Encodable::consensus_encode(&sock.port(), &mut s)?
-                    + Encodable::consensus_encode(&sock.ip().octets(), s)?;
+                    + Encodable::consensus_encode(&sock.ip().octets(), &mut s)?
+                    + Encodable::consensus_encode(&sock.port(), &mut s)?;
                 Ok(l)
             },
             Address::Ipv6(sock) => {
                 let t: u8 = 1;
                 let l = Encodable::consensus_encode(&t, &mut s)?
-                    + Encodable::consensus_encode(&sock.port(), &mut s)?
-                    + Encodable::consensus_encode(&sock.ip().octets(), s)?;
+                    + Encodable::consensus_encode(&sock.ip().octets(), &mut s)?
+                    + Encodable::consensus_encode(&sock.port(), &mut s)?;
+                Ok(l)
+            },
+            Address::OnionV3(b, p) => {
+                let t: u8 = 2;
+                let l = Encodable::consensus_encode(&t, &mut s)?
+                    + s.write(b)?
+                    + Encodable::consensus_encode(p, &mut s)?;
                 Ok(l)
             }
         }
@@ -305,31 +335,44 @@ impl Message {
 
 impl Encodable for Message {
     #[inline]
-    fn consensus_encode<S: ::std::io::Write>(
+    fn consensus_encode<S: io::Write>(
         &self,
         mut s: S,
-    ) -> Result<usize, ::std::io::Error> {
+    ) -> Result<usize, io::Error> {
+
+        fn write_payload<S, T>(mut s: &mut S, v: &T) -> Result<usize, io::Error>
+            where
+            S: io::Write,
+            T: Encodable + ?Sized,
+        {
+            let payload = serialize(v);
+            let mut len = 0;
+            len += VarInt(payload.len() as u64).consensus_encode(&mut s)?;
+            len += s.write(&payload)?;
+            Ok(len)
+        }
+
         let mut len = 0;
-        len += self.id().consensus_encode(&mut s)?;
-        let payload = match self {
-            Message::Version(payload) => serialize(payload),
-            Message::VersionAck => vec![],
-            Message::GetFilters(_) => vec![],
-            Message::Filters(_) => vec![],
-            Message::Filter(_) => vec![],
-            Message::GetPeers => vec![],
-            Message::Peers(_) => vec![],
-            Message::GetFee(_) => vec![],
-            Message::Fee(_) => vec![],
-            Message::PeerIntroduce(_) => vec![],
-            Message::Reject(_) => vec![],
-            Message::Ping(_) => vec![],
-            Message::Pong(_) => vec![],
-            Message::GetRates(_) => vec![],
-            Message::Rates(_) => vec![],
-        };
-        len += (payload.len() as u32).consensus_encode(&mut s)?;
-        len += s.write(&payload)?;
+        len += VarInt(self.id() as u64).consensus_encode(&mut s)?;
+        match self {
+            Message::Version(msg) => {
+                len += write_payload(&mut s, msg)?;
+            },
+            Message::VersionAck => (),
+            Message::GetFilters(_) => (),
+            Message::Filters(_) => (),
+            Message::Filter(_) => (),
+            Message::GetPeers => (),
+            Message::Peers(_) => (),
+            Message::GetFee(_) => (),
+            Message::Fee(_) => (),
+            Message::PeerIntroduce(_) => (),
+            Message::Reject(_) => (),
+            Message::Ping(_) => (),
+            Message::Pong(_) => (),
+            Message::GetRates(_) => (),
+            Message::Rates(_) => (),
+        }
         Ok(len)
     }
 }
@@ -339,32 +382,46 @@ impl Decodable for Message {
     fn consensus_decode<D: ::std::io::Read>(
         mut d: D,
     ) -> Result<Message, consensus_encode::Error> {
-        let id: u32 = Decodable::consensus_decode(&mut d)?;
-        let len: u32 = Decodable::consensus_decode(&mut d)?;
-        if len as usize > MAX_MESSAGE_SIZE {
-            Err(Error::ParseFailed("Message size is too large"))
-        } else {
-            let mut buf = vec![0; len as usize];
-            d.read_exact(&mut buf)?;
-            match id {
-                0 => Ok(Message::Version(deserialize::<VersionMessage>(&buf)?)),
-                // 1 => ,
-                // 2 => ,
-                // 3 => ,
-                // 4 => ,
-                // 5 => ,
-                // 6 => ,
-                // 7 => ,
-                // 8 => ,
-                // 9 => ,
-                // 10 => ,
-                // 11 => ,
-                // 12 => ,
-                // 13 => ,
-                // 14 => ,
-                _ => Err(Error::ParseFailed("Unknown message type")),
+
+        fn read_payload<F, D>(mut d: &mut D, mut f: F) -> Result<Message, consensus_encode::Error>
+            where
+            F: FnMut(&mut [u8]) -> Result<Message, consensus_encode::Error>,
+            D: io::Read,
+        {
+            let len = VarInt::consensus_decode(&mut d)?.0 as u32;
+            if len as usize > MAX_MESSAGE_SIZE {
+                Err(Error::ParseFailed("Message size is too large"))
+            } else {
+                let mut buf = vec![0; len as usize];
+                d.read_exact(&mut buf)?;
+                f(&mut buf)
             }
         }
+
+        let id = VarInt::consensus_decode(&mut d)?.0 as u32;
+        match id {
+            0 => {
+                read_payload(&mut d, |buf| {
+                    Ok(Message::Version(deserialize::<VersionMessage>(&buf)?))
+                })
+            }
+            1 => Ok(Message::VersionAck),
+            // 2 => ,
+            // 3 => ,
+            // 4 => ,
+            5 => Ok(Message::GetPeers),
+            // 6 => ,
+            // 7 => ,
+            // 8 => ,
+            // 9 => ,
+            // 10 => ,
+            // 11 => ,
+            // 12 => ,
+            // 13 => ,
+            // 14 => ,
+            _ => Err(Error::ParseFailed("Unknown message type")),
+        }
+
     }
 }
 
@@ -375,7 +432,36 @@ pub struct ScanBlock {
     scan_height: u64,
     height: u64,
 }
-impl_consensus_encoding!(ScanBlock, currency, version, scan_height, height);
+
+impl Encodable for ScanBlock {
+    #[inline]
+    fn consensus_encode<S: ::std::io::Write>(
+        &self,
+        mut s: S,
+    ) -> Result<usize, ::std::io::Error> {
+        let mut len = 0;
+        len += self.currency.consensus_encode(&mut s)?;
+        len += self.version.consensus_encode(&mut s)?;
+        len += VarInt(self.scan_height).consensus_encode(&mut s)?;
+        len += VarInt(self.height).consensus_encode(&mut s)?;
+        Ok(len)
+    }
+}
+
+impl Decodable for ScanBlock {
+    #[inline]
+    fn consensus_decode<D: ::std::io::Read>(
+        mut d: D,
+    ) -> Result<ScanBlock, consensus_encode::Error> {
+        Ok(ScanBlock {
+            currency: Decodable::consensus_decode(&mut d)?,
+            version: Decodable::consensus_decode(&mut d)?,
+            scan_height: VarInt::consensus_decode(&mut d)?.0,
+            height: VarInt::consensus_decode(&mut d)?.0,
+        })
+    }
+}
+
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct VersionMessage {
@@ -516,7 +602,7 @@ mod test {
     #[test]
     fn address_test_v4() {
         let addr = Address::Ipv4(net::SocketAddrV4::new(net::Ipv4Addr::new(127, 0, 0, 1), 4142));
-        let bytes = vec![0, 0x2E, 0x10, 127, 0, 0, 1];
+        let bytes = vec![0, 127, 0, 0, 1, 0x2E, 0x10];
         assert_eq!(serialize(&addr), bytes);
         assert_eq!(deserialize::<Address>(&bytes).unwrap(), addr);
     }
@@ -524,7 +610,7 @@ mod test {
     #[test]
     fn address_test_v6() {
         let addr = Address::Ipv6(net::SocketAddrV6::new(net::Ipv6Addr::new(0x2001, 0x0db8, 0x85a3, 0x0000, 0x0000, 0x8a2e, 0x0370, 0x7334), 4142, 0, 0));
-        let bytes = vec![1, 0x2E, 0x10, 0x20, 0x01, 0x0d, 0xb8, 0x85, 0xa3, 0x00, 0x00, 0x00, 0x00, 0x8a, 0x2e, 0x03, 0x70, 0x73, 0x34];
+        let bytes = vec![1, 0x20, 0x01, 0x0d, 0xb8, 0x85, 0xa3, 0x00, 0x00, 0x00, 0x00, 0x8a, 0x2e, 0x03, 0x70, 0x73, 0x34, 0x2E, 0x10 ];
         assert_eq!(serialize(&addr), bytes);
         assert_eq!(deserialize::<Address>(&bytes).unwrap(), addr);
     }
@@ -550,7 +636,15 @@ mod test {
                 }
             ],
         });
-        let bytes = Vec::from_hex("00000000480000000100200476854b60000000000001020304050607020000000000000001002004fb490a0000000000e09304000000000002000000000010101bb6050000000000400d030000000000").unwrap();
+        let bytes = Vec::from_hex("00330100200476854b60000000000001020304050607020001002004fefb490a00fee09304000200001010fe1bb60500fe400d0300").unwrap();
+        assert_eq!(serialize(&msg), bytes);
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+    }
+
+    #[test]
+    fn verack_msg_test() {
+        let msg = Message::VersionAck;
+        let bytes = Vec::from_hex("01").unwrap();
         assert_eq!(serialize(&msg), bytes);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
     }
