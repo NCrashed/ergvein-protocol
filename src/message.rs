@@ -354,7 +354,7 @@ impl Encodable for Message {
         match self {
             Message::Version(msg) => len += write_payload(&mut s, msg)?,
             Message::VersionAck => (),
-            Message::GetFilters(_) => (),
+            Message::GetFilters(msg) => len += write_payload(&mut s, msg)?,
             Message::Filters(_) => (),
             Message::Filter(_) => (),
             Message::GetPeers => (),
@@ -399,7 +399,9 @@ impl Decodable for Message {
                 Ok(Message::Version(deserialize::<VersionMessage>(&buf)?))
             }),
             1 => Ok(Message::VersionAck),
-            // 2 => ,
+            2 => read_payload(&mut d, |buf| {
+                Ok(Message::GetFilters(deserialize::<FiltersReq>(&buf)?))
+            }),
             // 3 => ,
             // 4 => ,
             5 => Ok(Message::GetPeers),
@@ -508,6 +510,33 @@ pub struct FiltersReq {
     currency: Currency,
     start: u64,
     amount: u32,
+}
+
+impl Encodable for FiltersReq {
+    #[inline]
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S,
+    ) -> Result<usize, io::Error> {
+        let mut len = 0;
+        len += self.currency.consensus_encode(&mut s)?;
+        len += VarInt(self.start).consensus_encode(&mut s)?;
+        len += VarInt(self.amount as u64).consensus_encode(&mut s)?;
+        Ok(len)
+    }
+}
+
+impl Decodable for FiltersReq {
+    #[inline]
+    fn consensus_decode<D: io::Read>(
+        mut d: D,
+    ) -> Result<FiltersReq, consensus_encode::Error> {
+        Ok(FiltersReq {
+            currency: Decodable::consensus_decode(&mut d)?,
+            start: VarInt::consensus_decode(&mut d)?.0,
+            amount: VarInt::consensus_decode(&mut d)?.0 as u32,
+        })
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -740,4 +769,17 @@ mod test {
         assert_eq!(serialize(&msg), bytes);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
     }
+
+    #[test]
+    fn filters_req_test() {
+        let msg = Message::GetFilters(FiltersReq {
+            currency: Currency::Btc,
+            start: 445123,
+            amount: 2000,
+        });
+        let bytes = Vec::from_hex("020900fec3ca0600fdd007").unwrap();
+        assert_eq!(serialize(&msg), bytes);
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+    }
+
 }
