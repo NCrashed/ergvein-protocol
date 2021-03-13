@@ -362,7 +362,7 @@ impl Encodable for Message {
             Message::GetFee(_) => (),
             Message::Fee(_) => (),
             Message::PeerIntroduce(_) => (),
-            Message::Reject(_) => (),
+            Message::Reject(msg) => len += write_payload(&mut s, msg)?,
             Message::Ping(msg) => len += write_payload(&mut s, msg)?,
             Message::Pong(msg) => len += write_payload(&mut s, msg)?,
             Message::GetRates(_) => (),
@@ -407,7 +407,9 @@ impl Decodable for Message {
             // 7 => ,
             // 8 => ,
             // 9 => ,
-            // 10 => ,
+            10 => read_payload(&mut d, |buf| {
+                Ok(Message::Reject(deserialize::<RejectMessage>(&buf)?))
+            }),
             11 => read_payload(&mut d, |buf| {
                 let mut nonce: [u8; 8] = Default::default();
                 nonce.copy_from_slice(&buf[0 .. 8]);
@@ -474,10 +476,10 @@ pub struct VersionMessage {
 
 impl Encodable for VersionMessage {
     #[inline]
-    fn consensus_encode<S: ::std::io::Write>(
+    fn consensus_encode<S: io::Write>(
         &self,
         mut s: S,
-    ) -> Result<usize, ::std::io::Error> {
+    ) -> Result<usize, io::Error> {
         let mut len = 0;
         len += self.version.consensus_encode(&mut s)?;
         len += self.time.consensus_encode(&mut s)?;
@@ -489,7 +491,7 @@ impl Encodable for VersionMessage {
 
 impl Decodable for VersionMessage {
     #[inline]
-    fn consensus_decode<D: ::std::io::Read>(
+    fn consensus_decode<D: io::Read>(
         mut d: D,
     ) -> Result<VersionMessage, consensus_encode::Error> {
         Ok(VersionMessage {
@@ -560,13 +562,74 @@ pub enum RejectData {
     InternalError,
     ZeroBytesReceived,
     VersionNotSupported,
+    Unknown(u32),
 }
+
+impl RejectData {
+    pub fn to_code(&self) -> u32 {
+        match self {
+            RejectData::HeaderParsing => 0,
+            RejectData::PayloadParsing => 1,
+            RejectData::InternalError => 2,
+            RejectData::ZeroBytesReceived => 3,
+            RejectData::VersionNotSupported => 4,
+            RejectData::Unknown(i) => *i,
+        }
+    }
+
+    pub fn from_code(i: u32) -> Self {
+        match i {
+            0 => RejectData::HeaderParsing,
+            1 => RejectData::PayloadParsing,
+            2 => RejectData::InternalError,
+            3 => RejectData::ZeroBytesReceived,
+            4 => RejectData::VersionNotSupported,
+            i => RejectData::Unknown(i),
+        }
+    }
+
+    fn pack(&self) -> VarInt {
+        VarInt(self.to_code() as u64)
+    }
+
+    fn unpack(i: VarInt) -> Self {
+        RejectData::from_code(i.0 as u32)
+    }
+}
+impl_pure_encodable!(RejectData, unpack, pack);
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RejectMessage {
     id: u32,
-    message: String,
     data: RejectData,
+    message: String,
+}
+
+impl Encodable for RejectMessage {
+    #[inline]
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S,
+    ) -> Result<usize, io::Error> {
+        let mut len = 0;
+        len += VarInt(self.id as u64).consensus_encode(&mut s)?;
+        len += self.data.consensus_encode(&mut s)?;
+        len += self.message.consensus_encode(&mut s)?;
+        Ok(len)
+    }
+}
+
+impl Decodable for RejectMessage {
+    #[inline]
+    fn consensus_decode<D: io::Read>(
+        mut d: D,
+    ) -> Result<RejectMessage, consensus_encode::Error> {
+        Ok(RejectMessage {
+            id: VarInt::consensus_decode(&mut d)?.0 as u32,
+            data: Decodable::consensus_decode(&mut d)?,
+            message: Decodable::consensus_decode(&mut d)?,
+        })
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -662,6 +725,18 @@ mod test {
     fn pong_msg_test() {
         let msg = Message::Pong([0xCF, 0x78, 0x06, 0, 0, 0, 0, 0]);
         let bytes = Vec::from_hex("0c08cf78060000000000").unwrap();
+        assert_eq!(serialize(&msg), bytes);
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+    }
+
+    #[test]
+    fn reject_msg_test() {
+        let msg = Message::Reject(RejectMessage {
+            id: 2,
+            data: RejectData::InternalError,
+            message: "Something went wrong".to_string(),
+        });
+        let bytes = Vec::from_hex("0a17020214536f6d657468696e672077656e742077726f6e67").unwrap();
         assert_eq!(serialize(&msg), bytes);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
     }
