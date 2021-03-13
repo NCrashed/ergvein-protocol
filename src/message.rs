@@ -363,7 +363,7 @@ impl Encodable for Message {
             Message::GetPeers => (),
             Message::Peers(_) => (),
             Message::GetFee(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
-            Message::Fee(_) => (),
+            Message::Fee(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
             Message::PeerIntroduce(_) => (),
             Message::Reject(msg) => len += write_payload(&mut s, msg)?,
             Message::Ping(msg) => len += write_payload(&mut s, msg)?,
@@ -416,7 +416,9 @@ impl Decodable for Message {
             7 => read_payload(&mut d, |buf| {
                 Ok(Message::GetFee(deserialize::<LengthVec<Currency>>(&buf)?.0))
             }),
-            // 8 => ,
+            8 => read_payload(&mut d, |buf| {
+                Ok(Message::Fee(deserialize::<LengthVec<FeeResp>>(&buf)?.0))
+            }),
             // 9 => ,
             10 => read_payload(&mut d, |buf| {
                 Ok(Message::Reject(deserialize::<RejectMessage>(&buf)?))
@@ -677,7 +679,6 @@ impl Decodable for FilterEvent {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FeeBtc {
-    currency: Currency,
     fast_conserv: u64,
     fast_econom: u64,
     moderate_conserv: u64,
@@ -686,18 +687,112 @@ pub struct FeeBtc {
     cheap_econom: u64,
 }
 
+impl Encodable for FeeBtc {
+    #[inline]
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S,
+    ) -> Result<usize, io::Error> {
+        let mut len = 0;
+        len += VarInt(self.fast_conserv).consensus_encode(&mut s)?;
+        len += VarInt(self.fast_econom).consensus_encode(&mut s)?;
+        len += VarInt(self.moderate_conserv).consensus_encode(&mut s)?;
+        len += VarInt(self.moderate_econom).consensus_encode(&mut s)?;
+        len += VarInt(self.cheap_conserv).consensus_encode(&mut s)?;
+        len += VarInt(self.cheap_econom).consensus_encode(&mut s)?;
+        Ok(len)
+    }
+}
+
+impl Decodable for FeeBtc {
+    #[inline]
+    fn consensus_decode<D: io::Read>(
+        mut d: D,
+    ) -> Result<FeeBtc, consensus_encode::Error> {
+        Ok(FeeBtc {
+            fast_conserv: VarInt::consensus_decode(&mut d)?.0,
+            fast_econom: VarInt::consensus_decode(&mut d)?.0,
+            moderate_conserv: VarInt::consensus_decode(&mut d)?.0,
+            moderate_econom: VarInt::consensus_decode(&mut d)?.0,
+            cheap_conserv: VarInt::consensus_decode(&mut d)?.0,
+            cheap_econom: VarInt::consensus_decode(&mut d)?.0,
+        })
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FeeOther {
-    currency: Currency,
     fast: u64,
     moderate: u64,
     cheap: u64,
 }
 
+impl Encodable for FeeOther {
+    #[inline]
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S,
+    ) -> Result<usize, io::Error> {
+        let mut len = 0;
+        len += VarInt(self.fast).consensus_encode(&mut s)?;
+        len += VarInt(self.moderate).consensus_encode(&mut s)?;
+        len += VarInt(self.cheap).consensus_encode(&mut s)?;
+        Ok(len)
+    }
+}
+
+impl Decodable for FeeOther {
+    #[inline]
+    fn consensus_decode<D: io::Read>(
+        mut d: D,
+    ) -> Result<FeeOther, consensus_encode::Error> {
+        Ok(FeeOther {
+            fast: VarInt::consensus_decode(&mut d)?.0,
+            moderate: VarInt::consensus_decode(&mut d)?.0,
+            cheap: VarInt::consensus_decode(&mut d)?.0,
+        })
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum FeeResp {
-    FeeBtc(FeeBtc),
-    FeeOther(FeeOther),
+    FeeBtc((Currency, FeeBtc)),
+    FeeOther((Currency, FeeOther)),
+}
+
+impl Encodable for FeeResp {
+    #[inline]
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S,
+    ) -> Result<usize, io::Error> {
+        let mut len = 0;
+        match self {
+            FeeResp::FeeBtc((currency, fee)) => {
+                assert_eq!(*currency == Currency::Btc || *currency == Currency::TBtc, true, "FeeBtc currency must be Btc or TBtc!");
+                len += currency.consensus_encode(&mut s)?;
+                len += fee.consensus_encode(&mut s)?
+            },
+            FeeResp::FeeOther((currency, fee)) => {
+                len += currency.consensus_encode(&mut s)?;
+                len += fee.consensus_encode(&mut s)?
+            }
+        }
+        Ok(len)
+    }
+}
+
+impl Decodable for FeeResp {
+    #[inline]
+    fn consensus_decode<D: io::Read>(
+        mut d: D,
+    ) -> Result<FeeResp, consensus_encode::Error> {
+        let cur = Currency::consensus_decode(&mut d)?;
+        match cur {
+            Currency::Btc | Currency::TBtc => Ok(FeeResp::FeeBtc((cur, Decodable::consensus_decode(&mut d)?))),
+            _ => Ok(FeeResp::FeeOther((cur, Decodable::consensus_decode(&mut d)?))),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -935,6 +1030,28 @@ mod test {
     fn fee_req_test() {
         let msg = Message::GetFee(vec![Currency::Btc, Currency::Dash]);
         let bytes = Vec::from_hex("070302000c").unwrap();
+        assert_eq!(serialize(&msg), bytes);
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+    }
+
+    #[test]
+    fn fee_resp_test() {
+        let msg = Message::Fee(vec![
+                FeeResp::FeeBtc((Currency::Btc, FeeBtc {
+                    fast_conserv: 4,
+                    fast_econom: 8,
+                    moderate_conserv: 15,
+                    moderate_econom: 16,
+                    cheap_conserv: 23,
+                    cheap_econom: 42,
+                })),
+                FeeResp::FeeOther((Currency::Dash, FeeOther {
+                    fast: 4,
+                    moderate: 8,
+                    cheap: 15,
+                }))
+            ]);
+        let bytes = Vec::from_hex("080c020004080f10172a0c04080f").unwrap();
         assert_eq!(serialize(&msg), bytes);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
     }
