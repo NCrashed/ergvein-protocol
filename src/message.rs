@@ -23,28 +23,7 @@ macro_rules! impl_pure_encodable{
     )
 }
 
-macro_rules! impl_option_encodable{
-    ($ty:ident, $meth_dec:ident, $meth_enc:ident, $err:literal) => (
-        impl Decodable for $ty {
-            #[inline]
-            fn consensus_decode<D: io::Read>(d: D) -> Result<Self, Error> {
-                $ty::$meth_dec(Decodable::consensus_decode(d)?).ok_or(Error::ParseFailed($err))
-            }
-        }
-        impl Encodable for $ty {
-            #[inline]
-            fn consensus_encode<S: io::Write>(
-                &self,
-                s: S,
-            ) -> Result<usize, io::Error> {
-                Encodable::consensus_encode(&self.$meth_enc(), s)
-            }
-        }
-    )
-}
-
 struct LengthVec<T>(Vec<T>);
-
 
 impl<T: Decodable> Decodable for LengthVec<T> {
     #[inline]
@@ -373,9 +352,7 @@ impl Encodable for Message {
         let mut len = 0;
         len += VarInt(self.id() as u64).consensus_encode(&mut s)?;
         match self {
-            Message::Version(msg) => {
-                len += write_payload(&mut s, msg)?;
-            },
+            Message::Version(msg) => len += write_payload(&mut s, msg)?,
             Message::VersionAck => (),
             Message::GetFilters(_) => (),
             Message::Filters(_) => (),
@@ -386,8 +363,8 @@ impl Encodable for Message {
             Message::Fee(_) => (),
             Message::PeerIntroduce(_) => (),
             Message::Reject(_) => (),
-            Message::Ping(_) => (),
-            Message::Pong(_) => (),
+            Message::Ping(msg) => len += write_payload(&mut s, msg)?,
+            Message::Pong(msg) => len += write_payload(&mut s, msg)?,
             Message::GetRates(_) => (),
             Message::Rates(_) => (),
         }
@@ -418,11 +395,9 @@ impl Decodable for Message {
 
         let id = VarInt::consensus_decode(&mut d)?.0 as u32;
         match id {
-            0 => {
-                read_payload(&mut d, |buf| {
-                    Ok(Message::Version(deserialize::<VersionMessage>(&buf)?))
-                })
-            }
+            0 => read_payload(&mut d, |buf| {
+                Ok(Message::Version(deserialize::<VersionMessage>(&buf)?))
+            }),
             1 => Ok(Message::VersionAck),
             // 2 => ,
             // 3 => ,
@@ -433,8 +408,16 @@ impl Decodable for Message {
             // 8 => ,
             // 9 => ,
             // 10 => ,
-            // 11 => ,
-            // 12 => ,
+            11 => read_payload(&mut d, |buf| {
+                let mut nonce: [u8; 8] = Default::default();
+                nonce.copy_from_slice(&buf[0 .. 8]);
+                Ok(Message::Ping(nonce))
+            }),
+            12 => read_payload(&mut d, |buf| {
+                let mut nonce: [u8; 8] = Default::default();
+                nonce.copy_from_slice(&buf[0 .. 8]);
+                Ok(Message::Pong(nonce))
+            }),
             // 13 => ,
             // 14 => ,
             _ => Err(Error::ParseFailed("Unknown message type")),
@@ -663,6 +646,22 @@ mod test {
     fn verack_msg_test() {
         let msg = Message::VersionAck;
         let bytes = Vec::from_hex("01").unwrap();
+        assert_eq!(serialize(&msg), bytes);
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+    }
+
+    #[test]
+    fn ping_msg_test() {
+        let msg = Message::Ping([0xCF, 0x78, 0x06, 0, 0, 0, 0, 0]);
+        let bytes = Vec::from_hex("0b08cf78060000000000").unwrap();
+        assert_eq!(serialize(&msg), bytes);
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+    }
+
+    #[test]
+    fn pong_msg_test() {
+        let msg = Message::Pong([0xCF, 0x78, 0x06, 0, 0, 0, 0, 0]);
+        let bytes = Vec::from_hex("0c08cf78060000000000").unwrap();
         assert_eq!(serialize(&msg), bytes);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
     }
