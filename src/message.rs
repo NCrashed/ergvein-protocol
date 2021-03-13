@@ -362,7 +362,7 @@ impl Encodable for Message {
             Message::Filter(msg) => len += write_payload(&mut s, msg)?,
             Message::GetPeers => (),
             Message::Peers(_) => (),
-            Message::GetFee(_) => (),
+            Message::GetFee(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
             Message::Fee(_) => (),
             Message::PeerIntroduce(_) => (),
             Message::Reject(msg) => len += write_payload(&mut s, msg)?,
@@ -413,7 +413,9 @@ impl Decodable for Message {
             }),
             5 => Ok(Message::GetPeers),
             // 6 => ,
-            // 7 => ,
+            7 => read_payload(&mut d, |buf| {
+                Ok(Message::GetFee(deserialize::<LengthVec<Currency>>(&buf)?.0))
+            }),
             // 8 => ,
             // 9 => ,
             10 => read_payload(&mut d, |buf| {
@@ -925,6 +927,14 @@ mod test {
             filter: b"abcd".to_vec(),
         });
         let bytes = Vec::from_hex("042900fd931f31323334353637383132333435363738313233343536373831323334353637380461626364").unwrap();
+        assert_eq!(serialize(&msg), bytes);
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+    }
+
+    #[test]
+    fn fee_req_test() {
+        let msg = Message::GetFee(vec![Currency::Btc, Currency::Dash]);
+        let bytes = Vec::from_hex("070302000c").unwrap();
         assert_eq!(serialize(&msg), bytes);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
     }
