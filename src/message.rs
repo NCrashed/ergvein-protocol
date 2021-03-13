@@ -192,23 +192,23 @@ impl Decodable for Address {
         match t {
             0 => {
                 let b: [u8; 4] = Decodable::consensus_decode(&mut d)?;
-                let p: u16 = Decodable::consensus_decode(&mut d)?;
                 let ip = net::Ipv4Addr::new(b[0], b[1], b[2], b[3]);
-                let addr = net::SocketAddrV4::new(ip, p);
+                let p: u16 = Decodable::consensus_decode(&mut d)?;
+                let addr = net::SocketAddrV4::new(ip, p.to_be());
                 Ok(Address::Ipv4(addr))
             }
             1 => {
                 let b: [u16; 8] = ipv6_to_be(Decodable::consensus_decode(&mut d)?);
-                let p: u16 = Decodable::consensus_decode(&mut d)?;
                 let ip = net::Ipv6Addr::new(b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
-                let addr = net::SocketAddrV6::new(ip, p, 0, 0);
+                let p: u16 = Decodable::consensus_decode(&mut d)?;
+                let addr = net::SocketAddrV6::new(ip, p.to_be(), 0, 0);
                 Ok(Address::Ipv6(addr))
             }
             2 => {
                 let mut b = [0; 56];
                 d.read_exact(&mut b)?;
                 let p: u16 = Decodable::consensus_decode(&mut d)?;
-                Ok(Address::OnionV3(b, p))
+                Ok(Address::OnionV3(b, p.to_be()))
             }
             _ => Err(Error::ParseFailed("Unknown address type")),
         }
@@ -225,21 +225,21 @@ impl Encodable for Address {
                 let t: u8 = 0;
                 let l = Encodable::consensus_encode(&t, &mut s)?
                     + Encodable::consensus_encode(&sock.ip().octets(), &mut s)?
-                    + Encodable::consensus_encode(&sock.port(), &mut s)?;
+                    + Encodable::consensus_encode(&sock.port().to_be(), &mut s)?;
                 Ok(l)
             },
             Address::Ipv6(sock) => {
                 let t: u8 = 1;
                 let l = Encodable::consensus_encode(&t, &mut s)?
                     + Encodable::consensus_encode(&sock.ip().octets(), &mut s)?
-                    + Encodable::consensus_encode(&sock.port(), &mut s)?;
+                    + Encodable::consensus_encode(&sock.port().to_be(), &mut s)?;
                 Ok(l)
             },
             Address::OnionV3(b, p) => {
                 let t: u8 = 2;
                 let l = Encodable::consensus_encode(&t, &mut s)?
                     + s.write(b)?
-                    + Encodable::consensus_encode(p, &mut s)?;
+                    + Encodable::consensus_encode(&p.to_be(), &mut s)?;
                 Ok(l)
             }
         }
@@ -361,7 +361,7 @@ impl Encodable for Message {
             Message::Filters(msg) => len += write_payload(&mut s, msg)?,
             Message::Filter(msg) => len += write_payload(&mut s, msg)?,
             Message::GetPeers => (),
-            Message::Peers(_) => (),
+            Message::Peers(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
             Message::GetFee(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
             Message::Fee(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
             Message::PeerIntroduce(_) => (),
@@ -412,7 +412,9 @@ impl Decodable for Message {
                 Ok(Message::Filter(deserialize::<FilterEvent>(&buf)?))
             }),
             5 => Ok(Message::GetPeers),
-            // 6 => ,
+            6 => read_payload(&mut d, |buf| {
+                Ok(Message::Peers(deserialize::<LengthVec<Address>>(&buf)?.0))
+            }),
             7 => read_payload(&mut d, |buf| {
                 Ok(Message::GetFee(deserialize::<LengthVec<Currency>>(&buf)?.0))
             }),
@@ -906,7 +908,7 @@ mod test {
     #[test]
     fn address_test_v4() {
         let addr = Address::Ipv4(net::SocketAddrV4::new(net::Ipv4Addr::new(127, 0, 0, 1), 4142));
-        let bytes = vec![0, 127, 0, 0, 1, 0x2E, 0x10];
+        let bytes = vec![0, 127, 0, 0, 1, 0x10, 0x2E];
         assert_eq!(serialize(&addr), bytes);
         assert_eq!(deserialize::<Address>(&bytes).unwrap(), addr);
     }
@@ -914,7 +916,15 @@ mod test {
     #[test]
     fn address_test_v6() {
         let addr = Address::Ipv6(net::SocketAddrV6::new(net::Ipv6Addr::new(0x2001, 0x0db8, 0x85a3, 0x0000, 0x0000, 0x8a2e, 0x0370, 0x7334), 4142, 0, 0));
-        let bytes = vec![1, 0x20, 0x01, 0x0d, 0xb8, 0x85, 0xa3, 0x00, 0x00, 0x00, 0x00, 0x8a, 0x2e, 0x03, 0x70, 0x73, 0x34, 0x2E, 0x10 ];
+        let bytes = vec![1, 0x20, 0x01, 0x0d, 0xb8, 0x85, 0xa3, 0x00, 0x00, 0x00, 0x00, 0x8a, 0x2e, 0x03, 0x70, 0x73, 0x34, 0x10, 0x2E ];
+        assert_eq!(serialize(&addr), bytes);
+        assert_eq!(deserialize::<Address>(&bytes).unwrap(), addr);
+    }
+
+    #[test]
+    fn address_test_onion() {
+        let addr = Address::OnionV3(*b"jamie22ezawwi5r3o7lrgsno43jj7vq5en74czuw6wfmjzkhjjryxnid", 9150);
+        let bytes = vec![2, 106, 97, 109, 105, 101, 50, 50, 101, 122, 97, 119, 119, 105, 53, 114, 51, 111, 55, 108, 114, 103, 115, 110, 111, 52, 51, 106, 106, 55, 118, 113, 53, 101, 110, 55, 52, 99, 122, 117, 119, 54, 119, 102, 109, 106, 122, 107, 104, 106, 106, 114, 121, 120, 110, 105, 100, 35, 190];
         assert_eq!(serialize(&addr), bytes);
         assert_eq!(deserialize::<Address>(&bytes).unwrap(), addr);
     }
@@ -1060,6 +1070,18 @@ mod test {
     fn peer_req_test() {
         let msg = Message::GetPeers;
         let bytes = Vec::from_hex("05").unwrap();
+        assert_eq!(serialize(&msg), bytes);
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+    }
+
+    #[test]
+    fn peer_resp_test() {
+        let msg = Message::Peers(vec![
+              Address::Ipv4(net::SocketAddrV4::new(net::Ipv4Addr::new(127, 0, 0, 1), 8333))
+            , Address::Ipv6(net::SocketAddrV6::new(net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1), 8333, 0, 0))
+            , Address::OnionV3(*b"jamie22ezawwi5r3o7lrgsno43jj7vq5en74czuw6wfmjzkhjjryxnid", 9150)
+            ]);
+        let bytes = Vec::from_hex("065603007f000001208d0100000000000000000000000000000001208d026a616d69653232657a617777693572336f376c7267736e6f34336a6a37767135656e3734637a75773677666d6a7a6b686a6a7279786e696423be").unwrap();
         assert_eq!(serialize(&msg), bytes);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
     }
