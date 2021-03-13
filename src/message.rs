@@ -359,7 +359,7 @@ impl Encodable for Message {
             Message::VersionAck => (),
             Message::GetFilters(msg) => len += write_payload(&mut s, msg)?,
             Message::Filters(msg) => len += write_payload(&mut s, msg)?,
-            Message::Filter(_) => (),
+            Message::Filter(msg) => len += write_payload(&mut s, msg)?,
             Message::GetPeers => (),
             Message::Peers(_) => (),
             Message::GetFee(_) => (),
@@ -408,7 +408,9 @@ impl Decodable for Message {
             3 => read_payload(&mut d, |buf| {
                 Ok(Message::Filters(deserialize::<FiltersResp>(&buf)?))
             }),
-            // 4 => ,
+            4 => read_payload(&mut d, |buf| {
+                Ok(Message::Filter(deserialize::<FilterEvent>(&buf)?))
+            }),
             5 => Ok(Message::GetPeers),
             // 6 => ,
             // 7 => ,
@@ -632,13 +634,43 @@ impl Decodable for FiltersResp {
     }
 }
 
-
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FilterEvent {
     currency: Currency,
     height: u64,
     block_id: Vec<u8>,
     filter: Vec<u8>,
+}
+
+impl Encodable for FilterEvent {
+    #[inline]
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S,
+    ) -> Result<usize, io::Error> {
+        let mut len = 0;
+        len += self.currency.consensus_encode(&mut s)?;
+        len += VarInt(self.height).consensus_encode(&mut s)?;
+        s.write_all(&self.block_id)?;
+        len += self.block_id.len();
+        len += self.filter.consensus_encode(&mut s)?;
+        Ok(len)
+    }
+}
+
+impl Decodable for FilterEvent {
+    #[inline]
+    fn consensus_decode<D: io::Read>(
+        mut d: D,
+    ) -> Result<FilterEvent, consensus_encode::Error> {
+        let mut buf = [0; 32];
+        Ok(FilterEvent {
+            currency: Decodable::consensus_decode(&mut d)?,
+            height: VarInt::consensus_decode(&mut d)?.0,
+            block_id: { d.read_exact(&mut buf)?; buf.to_vec() },
+            filter: Decodable::consensus_decode(&mut d)?,
+        })
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -882,6 +914,19 @@ mod test {
         let bytes = Vec::from_hex("032b00021f8b080000000000000333343236313533b730c441b3242625a71811529406040096e289844a000000").unwrap();
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
         assert_eq!(deserialize::<Message>(&serialize(&msg)).unwrap(), msg);
+    }
+
+    #[test]
+    fn filter_event_test() {
+        let msg = Message::Filter(FilterEvent {
+            currency: Currency::Btc,
+            height: 8083,
+            block_id: b"12345678123456781234567812345678".to_vec(),
+            filter: b"abcd".to_vec(),
+        });
+        let bytes = Vec::from_hex("042900fd931f31323334353637383132333435363738313233343536373831323334353637380461626364").unwrap();
+        assert_eq!(serialize(&msg), bytes);
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
     }
 
 }
