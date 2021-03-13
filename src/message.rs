@@ -99,6 +99,7 @@ pub enum Currency {
     TCpr,
     Dash,
     TDash,
+    Unknown(u32),
 }
 
 impl Currency {
@@ -118,26 +119,27 @@ impl Currency {
             Currency::TCpr => 11,
             Currency::Dash => 12,
             Currency::TDash => 13,
+            Currency::Unknown(i) => *i,
         }
     }
 
-    pub fn from_index(i: u32) -> Option<Self> {
+    pub fn from_index(i: u32) -> Self {
         match i {
-            0 => Some(Currency::Btc),
-            1 => Some(Currency::TBtc),
-            2 => Some(Currency::Ergo),
-            3 => Some(Currency::TErgo),
-            4 => Some(Currency::UsdtOmni),
-            5 => Some(Currency::TUsdtOmni),
-            6 => Some(Currency::Ltc),
-            7 => Some(Currency::TLtc),
-            8 => Some(Currency::Zec),
-            9 => Some(Currency::TZec),
-            10 => Some(Currency::Cpr),
-            11 => Some(Currency::TCpr),
-            12 => Some(Currency::Dash),
-            13 => Some(Currency::TDash),
-            _ => None,
+            0 => Currency::Btc,
+            1 => Currency::TBtc,
+            2 => Currency::Ergo,
+            3 => Currency::TErgo,
+            4 => Currency::UsdtOmni,
+            5 => Currency::TUsdtOmni,
+            6 => Currency::Ltc,
+            7 => Currency::TLtc,
+            8 => Currency::Zec,
+            9 => Currency::TZec,
+            10 => Currency::Cpr,
+            11 => Currency::TCpr,
+            12 => Currency::Dash,
+            13 => Currency::TDash,
+            i => Currency::Unknown(i),
         }
     }
 
@@ -145,11 +147,11 @@ impl Currency {
         VarInt(self.to_index() as u64)
     }
 
-    fn unpack(i: VarInt) -> Option<Self> {
+    fn unpack(i: VarInt) -> Self {
         Currency::from_index(i.0 as u32)
     }
 }
-impl_option_encodable!(Currency, unpack, pack, "Unknown currency");
+impl_pure_encodable!(Currency, unpack, pack);
 
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -157,6 +159,7 @@ pub enum Fiat {
     Usd,
     Eur,
     Rub,
+    Unknown(u32),
 }
 
 impl Fiat {
@@ -165,15 +168,16 @@ impl Fiat {
             Fiat::Usd => 0,
             Fiat::Eur => 1,
             Fiat::Rub => 2,
+            Fiat::Unknown(i) => *i,
         }
     }
 
-    pub fn from_index(i: u32) -> Option<Self> {
+    pub fn from_index(i: u32) -> Self {
         match i {
-            0 => Some(Fiat::Usd),
-            1 => Some(Fiat::Eur),
-            2 => Some(Fiat::Rub),
-            _ => None,
+            0 => Fiat::Usd,
+            1 => Fiat::Eur,
+            2 => Fiat::Rub,
+            i => Fiat::Unknown(i),
         }
     }
 
@@ -181,11 +185,11 @@ impl Fiat {
         VarInt(self.to_index() as u64)
     }
 
-    fn unpack(i: VarInt) -> Option<Self> {
+    fn unpack(i: VarInt) -> Self {
         Fiat::from_index(i.0 as u32)
     }
 }
-impl_option_encodable!(Fiat, unpack, pack, "Unknown fiat");
+impl_pure_encodable!(Fiat, unpack, pack);
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Address {
@@ -268,6 +272,20 @@ pub struct Version {
 }
 
 impl Version {
+    /// Current implemented version
+    pub fn current() -> Self {
+        Version {
+            major: 2,
+            minor: 0,
+            patch: 0,
+        }
+    }
+
+    /// Check whether versions compatible
+    pub fn compatible(&self, v: &Self) -> bool {
+        self.major == v.major
+    }
+
     /// Pack version as 32 bit word with 10 bits per component and 2 reserved bits.
     pub fn pack(&self) -> u32 {
         (((self.major & 0b000001111111111) as u32) <<  2) +
