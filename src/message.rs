@@ -1056,4 +1056,11 @@ mod test {
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
     }
 
+    #[test]
+    fn peer_req_test() {
+        let msg = Message::GetPeers;
+        let bytes = Vec::from_hex("05").unwrap();
+        assert_eq!(serialize(&msg), bytes);
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+    }
 }
