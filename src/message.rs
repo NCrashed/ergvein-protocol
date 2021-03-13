@@ -363,7 +363,7 @@ impl Encodable for Message {
             Message::Peers(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
             Message::GetFee(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
             Message::Fee(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
-            Message::PeerIntroduce(_) => (),
+            Message::PeerIntroduce(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
             Message::Reject(msg) => len += write_payload(&mut s, msg)?,
             Message::Ping(msg) => len += write_payload(&mut s, msg)?,
             Message::Pong(msg) => len += write_payload(&mut s, msg)?,
@@ -420,7 +420,9 @@ impl Decodable for Message {
             8 => read_payload(&mut d, |buf| {
                 Ok(Message::Fee(deserialize::<LengthVec<FeeResp>>(&buf)?.0))
             }),
-            // 9 => ,
+            9 => read_payload(&mut d, |buf| {
+                Ok(Message::PeerIntroduce(deserialize::<LengthVec<Address>>(&buf)?.0))
+            }),
             10 => read_payload(&mut d, |buf| {
                 Ok(Message::Reject(deserialize::<RejectMessage>(&buf)?))
             }),
@@ -1237,4 +1239,17 @@ mod test {
         assert_eq!(serialize(&msg), bytes);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
     }
+
+    #[test]
+    fn peer_introduce_test() {
+        let msg = Message::PeerIntroduce(vec![
+              Address::Ipv4(net::SocketAddrV4::new(net::Ipv4Addr::new(127, 0, 0, 1), 8333))
+            , Address::Ipv6(net::SocketAddrV6::new(net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1), 8333, 0, 0))
+            , Address::OnionV3(*b"jamie22ezawwi5r3o7lrgsno43jj7vq5en74czuw6wfmjzkhjjryxnid", 9150)
+            ]);
+        let bytes = Vec::from_hex("095603007f000001208d0100000000000000000000000000000001208d026a616d69653232657a617777693572336f376c7267736e6f34336a6a37767135656e3734637a75773677666d6a7a6b686a6a7279786e696423be").unwrap();
+        assert_eq!(serialize(&msg), bytes);
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+    }
+
 }
