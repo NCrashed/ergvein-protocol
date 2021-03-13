@@ -7,6 +7,6 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-fixed = "^1.6"
+fix = "^0.1"
 flate2 = "^1.0"
 consensus-encode = { git = "https://github.com/NCrashed/consensus-encode" }

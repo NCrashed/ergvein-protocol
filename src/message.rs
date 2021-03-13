@@ -1,7 +1,6 @@
 use std::{net, io, mem};
 use std::io::{Write, Cursor};
-use fixed::types::extra::U7;
-use fixed::FixedU64;
+use fix::aliases::si::Centi;
 use flate2::Compression;
 use flate2::write::{GzDecoder, GzEncoder};
 pub use consensus_encode::{Error, Decodable, Encodable, deserialize, deserialize_partial, serialize, serialize_hex, MAX_VEC_SIZE, VarInt};
@@ -369,7 +368,7 @@ impl Encodable for Message {
             Message::Ping(msg) => len += write_payload(&mut s, msg)?,
             Message::Pong(msg) => len += write_payload(&mut s, msg)?,
             Message::GetRates(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
-            Message::Rates(_) => (),
+            Message::Rates(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
         }
         Ok(len)
     }
@@ -438,7 +437,9 @@ impl Decodable for Message {
             13 => read_payload(&mut d, |buf| {
                 Ok(Message::GetRates(deserialize::<LengthVec<RateReq>>(&buf)?.0))
             }),
-            // 14 => ,
+            14 => read_payload(&mut d, |buf| {
+                Ok(Message::Rates(deserialize::<LengthVec<RateResp>>(&buf)?.0))
+            }),
             _ => Err(Error::ParseFailed("Unknown message type")),
         }
 
@@ -907,10 +908,94 @@ impl Decodable for RateReq {
     }
 }
 
+/// Fiat value with 2 decimals after point
+pub type Rate = Centi<u64>;
+
+struct RateWord(Rate);
+
+impl Encodable for RateWord {
+    #[inline]
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S,
+    ) -> Result<usize, io::Error> {
+        let w: u64 = self.0.bits;
+        let len = w.consensus_encode(&mut s)?;
+        Ok(len)
+    }
+}
+
+impl Decodable for RateWord {
+    #[inline]
+    fn consensus_decode<D: io::Read>(
+        mut d: D,
+    ) -> Result<RateWord, consensus_encode::Error> {
+        let w: u64 = Decodable::consensus_decode(&mut d)?;
+        Ok(RateWord(Rate::new(w)))
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct FiatRate {
+    fiat: Fiat,
+    rate: Rate,
+}
+
+impl Encodable for FiatRate {
+    #[inline]
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S,
+    ) -> Result<usize, io::Error> {
+        let mut len = 0;
+        len += self.fiat.consensus_encode(&mut s)?;
+        len += RateWord(self.rate).consensus_encode(&mut s)?;
+        Ok(len)
+    }
+}
+
+impl Decodable for FiatRate {
+    #[inline]
+    fn consensus_decode<D: io::Read>(
+        mut d: D,
+    ) -> Result<FiatRate, consensus_encode::Error> {
+        Ok(FiatRate {
+            fiat: Decodable::consensus_decode(&mut d)?,
+            rate: RateWord::consensus_decode(&mut d)?.0,
+        })
+    }
+}
+
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RateResp {
     currency: Currency,
-    rates: Vec<(Fiat, FixedU64<U7>)>
+    rates: Vec<FiatRate>
+}
+
+impl Encodable for RateResp {
+    #[inline]
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S,
+    ) -> Result<usize, io::Error> {
+        let mut len = 0;
+        len += self.currency.consensus_encode(&mut s)?;
+        len += LengthVecRef(&self.rates).consensus_encode(&mut s)?;
+        Ok(len)
+    }
+}
+
+impl Decodable for RateResp {
+    #[inline]
+    fn consensus_decode<D: io::Read>(
+        mut d: D,
+    ) -> Result<RateResp, consensus_encode::Error> {
+        Ok(RateResp {
+            currency: Decodable::consensus_decode(&mut d)?,
+            rates: LengthVec::consensus_decode(&mut d)?.0,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -1126,6 +1211,29 @@ mod test {
                 },
             ]);
         let bytes = Vec::from_hex("0d0902000200020c020102").unwrap();
+        assert_eq!(serialize(&msg), bytes);
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+    }
+
+    #[test]
+    fn rates_resp_test() {
+        let msg = Message::Rates(vec![
+                RateResp {
+                    currency: Currency::Btc,
+                    rates: vec![
+                      FiatRate { fiat: Fiat::Usd, rate: Rate::new(65003_23) },
+                      FiatRate { fiat: Fiat::Rub, rate: Rate::new(350000_42) },
+                    ],
+                },
+                RateResp {
+                    currency: Currency::Dash,
+                    rates: vec![
+                      FiatRate { fiat: Fiat::Eur, rate: Rate::new(0_12) },
+                      FiatRate { fiat: Fiat::Rub, rate: Rate::new(0_01) },
+                    ],
+                },
+            ]);
+        let bytes = Vec::from_hex("0e2902000200e32f63000000000002ea0e1602000000000c02010c00000000000000020100000000000000").unwrap();
         assert_eq!(serialize(&msg), bytes);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
     }
