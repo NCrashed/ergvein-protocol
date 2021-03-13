@@ -1,6 +1,9 @@
 use std::{net, io, mem};
+use std::io::{Write, Cursor};
 use fixed::types::extra::U7;
 use fixed::FixedU64;
+use flate2::Compression;
+use flate2::write::{GzDecoder, GzEncoder};
 pub use consensus_encode::{Error, Decodable, Encodable, deserialize, deserialize_partial, serialize, serialize_hex, MAX_VEC_SIZE, VarInt};
 
 macro_rules! impl_pure_encodable{
@@ -355,7 +358,7 @@ impl Encodable for Message {
             Message::Version(msg) => len += write_payload(&mut s, msg)?,
             Message::VersionAck => (),
             Message::GetFilters(msg) => len += write_payload(&mut s, msg)?,
-            Message::Filters(_) => (),
+            Message::Filters(msg) => len += write_payload(&mut s, msg)?,
             Message::Filter(_) => (),
             Message::GetPeers => (),
             Message::Peers(_) => (),
@@ -402,7 +405,9 @@ impl Decodable for Message {
             2 => read_payload(&mut d, |buf| {
                 Ok(Message::GetFilters(deserialize::<FiltersReq>(&buf)?))
             }),
-            // 3 => ,
+            3 => read_payload(&mut d, |buf| {
+                Ok(Message::Filters(deserialize::<FiltersResp>(&buf)?))
+            }),
             // 4 => ,
             5 => Ok(Message::GetPeers),
             // 6 => ,
@@ -545,11 +550,88 @@ pub struct Filter {
     filter: Vec<u8>,
 }
 
+impl Encodable for Filter {
+    #[inline]
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S,
+    ) -> Result<usize, io::Error> {
+        let mut len = 0;
+        len += s.write(&self.block_id)?;
+        len += self.filter.consensus_encode(&mut s)?;
+        Ok(len)
+    }
+}
+
+impl Decodable for Filter {
+    #[inline]
+    fn consensus_decode<D: io::Read>(
+        mut d: D,
+    ) -> Result<Filter, consensus_encode::Error> {
+        let bid: [u8; 32] = Decodable::consensus_decode(&mut d)?;
+        Ok(Filter {
+            block_id: bid.to_vec(),
+            filter: Decodable::consensus_decode(&mut d)?,
+        })
+    }
+}
+
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FiltersResp {
     currency: Currency,
     filters: Vec<Filter>
 }
+
+impl Encodable for FiltersResp {
+    #[inline]
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S,
+    ) -> Result<usize, io::Error> {
+        let mut len = 0;
+        len += self.currency.consensus_encode(&mut s)?;
+        len += VarInt(self.filters.len() as u64).consensus_encode(&mut s)?;
+
+        let mut e = GzEncoder::new(Vec::new(), Compression::default());
+        for f in &self.filters {
+            e.write_all(&serialize(&f))?;
+        }
+        let compressed_bytes = e.finish()?;
+        s.write_all(&compressed_bytes)?;
+        len += compressed_bytes.len();
+
+        Ok(len)
+    }
+}
+
+impl Decodable for FiltersResp {
+    #[inline]
+    fn consensus_decode<D: io::Read>(
+        mut d: D,
+    ) -> Result<FiltersResp, consensus_encode::Error> {
+        let cur = Decodable::consensus_decode(&mut d)?;
+        let amount = VarInt::consensus_decode(&mut d)?.0;
+
+        let mut buf = vec![];
+        d.read_to_end(&mut buf)?;
+        let mut gz = GzDecoder::new(Vec::new());
+        gz.write_all(&buf)?;
+        let uncompressed = gz.finish()?;
+
+        let mut decoder = Cursor::new(uncompressed);
+        let mut fs = vec![];
+        for _ in 0 .. amount {
+            fs.push(Filter::consensus_decode(&mut decoder)?);
+        }
+
+        Ok(FiltersResp {
+            currency: cur,
+            filters: fs,
+        })
+    }
+}
+
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FilterEvent {
@@ -780,6 +862,26 @@ mod test {
         let bytes = Vec::from_hex("020900fec3ca0600fdd007").unwrap();
         assert_eq!(serialize(&msg), bytes);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+    }
+
+    #[test]
+    fn filters_resp_test() {
+        let msg = Message::Filters(FiltersResp {
+            currency: Currency::Btc,
+            filters: vec![
+                Filter {
+                    block_id: b"12345678123456781234567812345678".to_vec(),
+                    filter: b"abcd".to_vec(),
+                },
+                Filter {
+                    block_id: b"22345678123456781234567812345678".to_vec(),
+                    filter: b"ffff".to_vec(),
+                },
+            ],
+        });
+        let bytes = Vec::from_hex("032b00021f8b080000000000000333343236313533b730c441b3242625a71811529406040096e289844a000000").unwrap();
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+        assert_eq!(deserialize::<Message>(&serialize(&msg)).unwrap(), msg);
     }
 
 }
