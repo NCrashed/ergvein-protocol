@@ -4,6 +4,7 @@ use fix::aliases::si::Centi;
 use flate2::Compression;
 use flate2::write::{GzDecoder, GzEncoder};
 pub use consensus_encode::{Error, Decodable, Encodable, deserialize, deserialize_partial, serialize, serialize_hex, MAX_VEC_SIZE, VarInt};
+pub use consensus_encode::util::stream_reader::StreamReader;
 
 macro_rules! impl_pure_encodable{
     ($ty:ident, $meth_dec:ident, $meth_enc:ident) => (
@@ -247,9 +248,9 @@ impl Encodable for Address {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Version {
-    major: u16, // used only 10 bits
-    minor: u16,
-    patch: u16,
+    pub major: u16, // used only 10 bits
+    pub minor: u16,
+    pub patch: u16,
 }
 
 impl Version {
@@ -450,10 +451,10 @@ impl Decodable for Message {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ScanBlock {
-    currency: Currency,
-    version: Version,
-    scan_height: u64,
-    height: u64,
+    pub currency: Currency,
+    pub version: Version,
+    pub scan_height: u64,
+    pub height: u64,
 }
 
 impl Encodable for ScanBlock {
@@ -488,10 +489,10 @@ impl Decodable for ScanBlock {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct VersionMessage {
-    version: Version,
-    time: u64,
-    nonce: [u8; 8],
-    scan_blocks: Vec<ScanBlock>,
+    pub version: Version,
+    pub time: u64,
+    pub nonce: [u8; 8],
+    pub scan_blocks: Vec<ScanBlock>,
 }
 
 impl Encodable for VersionMessage {
@@ -525,9 +526,9 @@ impl Decodable for VersionMessage {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FiltersReq {
-    currency: Currency,
-    start: u64,
-    amount: u32,
+    pub currency: Currency,
+    pub start: u64,
+    pub amount: u32,
 }
 
 impl Encodable for FiltersReq {
@@ -559,8 +560,8 @@ impl Decodable for FiltersReq {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Filter {
-    block_id: Vec<u8>,
-    filter: Vec<u8>,
+    pub block_id: Vec<u8>,
+    pub filter: Vec<u8>,
 }
 
 impl Encodable for Filter {
@@ -592,8 +593,8 @@ impl Decodable for Filter {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FiltersResp {
-    currency: Currency,
-    filters: Vec<Filter>
+    pub currency: Currency,
+    pub filters: Vec<Filter>
 }
 
 impl Encodable for FiltersResp {
@@ -647,10 +648,10 @@ impl Decodable for FiltersResp {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FilterEvent {
-    currency: Currency,
-    height: u64,
-    block_id: Vec<u8>,
-    filter: Vec<u8>,
+    pub currency: Currency,
+    pub height: u64,
+    pub block_id: Vec<u8>,
+    pub filter: Vec<u8>,
 }
 
 impl Encodable for FilterEvent {
@@ -686,12 +687,12 @@ impl Decodable for FilterEvent {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FeeBtc {
-    fast_conserv: u64,
-    fast_econom: u64,
-    moderate_conserv: u64,
-    moderate_econom: u64,
-    cheap_conserv: u64,
-    cheap_econom: u64,
+    pub fast_conserv: u64,
+    pub fast_econom: u64,
+    pub moderate_conserv: u64,
+    pub moderate_econom: u64,
+    pub cheap_conserv: u64,
+    pub cheap_econom: u64,
 }
 
 impl Encodable for FeeBtc {
@@ -729,9 +730,9 @@ impl Decodable for FeeBtc {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FeeOther {
-    fast: u64,
-    moderate: u64,
-    cheap: u64,
+    pub fast: u64,
+    pub moderate: u64,
+    pub cheap: u64,
 }
 
 impl Encodable for FeeOther {
@@ -847,9 +848,9 @@ impl_pure_encodable!(RejectData, unpack, pack);
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RejectMessage {
-    id: u32,
-    data: RejectData,
-    message: String,
+    pub id: u32,
+    pub data: RejectData,
+    pub message: String,
 }
 
 impl Encodable for RejectMessage {
@@ -881,8 +882,8 @@ impl Decodable for RejectMessage {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RateReq {
-    currency: Currency,
-    fiats: Vec<Fiat>,
+    pub currency: Currency,
+    pub fiats: Vec<Fiat>,
 }
 
 impl Encodable for RateReq {
@@ -939,8 +940,8 @@ impl Decodable for RateWord {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FiatRate {
-    fiat: Fiat,
-    rate: Rate,
+    pub fiat: Fiat,
+    pub rate: Rate,
 }
 
 impl Encodable for FiatRate {
@@ -971,8 +972,8 @@ impl Decodable for FiatRate {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RateResp {
-    currency: Currency,
-    rates: Vec<FiatRate>
+    pub currency: Currency,
+    pub rates: Vec<FiatRate>
 }
 
 impl Encodable for RateResp {
