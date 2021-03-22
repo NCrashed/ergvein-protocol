@@ -65,7 +65,7 @@ impl<'a, T: Encodable> Encodable for LengthVecRef<'a, T> {
 
 /// Currencies that protocol aware of, there can be currencies that will never be implemented but
 /// index in protocol is known.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Currency {
     Btc,
     TBtc,
@@ -136,7 +136,7 @@ impl Currency {
 impl_pure_encodable!(Currency, unpack, pack);
 
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Fiat {
     Usd,
     Eur,
