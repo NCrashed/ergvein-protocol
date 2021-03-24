@@ -81,7 +81,7 @@ fn build_version_message() -> Message {
     Message::Version(VersionMessage {
         version: Version::current(),
         time: timestamp,
-        nonce: nonce,
+        nonce,
         scan_blocks: vec![],
     })
 }

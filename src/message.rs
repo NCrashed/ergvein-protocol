@@ -1,9 +1,11 @@
-use std::{net, io};
-use std::io::{Write, Cursor};
 use fix::aliases::si::Centi;
 use flate2::Compression;
 use flate2::write::{GzDecoder, GzEncoder};
+use std::{net, io};
+use std::fmt::{Display, Formatter};
+use std::io::{Write, Cursor};
 use crate::util::*;
+use consensus_encode::util::hex::ToHex;
 pub use consensus_encode::{Error, Decodable, Encodable, deserialize, deserialize_partial, serialize, serialize_hex, MAX_VEC_SIZE, VarInt};
 pub use consensus_encode::util::stream_reader::StreamReader;
 
@@ -29,7 +31,7 @@ macro_rules! impl_pure_encodable{
 
 /// Currencies that protocol aware of, there can be currencies that will never be implemented but
 /// index in protocol is known.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum Currency {
     Btc,
     TBtc,
@@ -46,6 +48,34 @@ pub enum Currency {
     Dash,
     TDash,
     Unknown(u32),
+}
+
+impl Default for Currency {
+    fn default() -> Self {
+        Currency::Btc
+    }
+}
+
+impl Display for Currency {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Currency::Btc => write!(f, "Bitcoin"),
+            Currency::TBtc => write!(f, "Testnet Bitcoin"),
+            Currency::Ergo => write!(f, "Ergo"),
+            Currency::TErgo => write!(f, "Testnet Ergo"),
+            Currency::UsdtOmni => write!(f, "USDT on Omni"),
+            Currency::TUsdtOmni => write!(f, "Testnet USDT on Omni"),
+            Currency::Ltc => write!(f, "Litecoin"),
+            Currency::TLtc => write!(f, "Testnet Litecoin"),
+            Currency::Zec => write!(f, "ZCash"),
+            Currency::TZec => write!(f, "Testnet ZCash"),
+            Currency::Cpr => write!(f, "Cypra"),
+            Currency::TCpr => write!(f, "Testnet Cypra"),
+            Currency::Dash => write!(f, "Dash"),
+            Currency::TDash => write!(f, "Testnet Dash"),
+            Currency::Unknown(i) => write!(f, "Unknown currency {}", i),
+        }
+    }
 }
 
 impl Currency {
@@ -100,12 +130,23 @@ impl Currency {
 impl_pure_encodable!(Currency, unpack, pack);
 
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Debug, Hash)]
 pub enum Fiat {
     Usd,
     Eur,
     Rub,
     Unknown(u32),
+}
+
+impl Display for Fiat {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Fiat::Usd => write!(f, "US Dollar"),
+            Fiat::Eur => write!(f, "Euro"),
+            Fiat::Rub => write!(f, "Ruble"),
+            Fiat::Unknown(i) => write!(f, "Unknown fiat currency {}", i),
+        }
+    }
 }
 
 impl Fiat {
@@ -137,11 +178,24 @@ impl Fiat {
 }
 impl_pure_encodable!(Fiat, unpack, pack);
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Debug, Hash)]
 pub enum Address {
     Ipv4(net::SocketAddrV4),
     Ipv6(net::SocketAddrV6),
     OnionV3([u8; 56], u16),
+}
+
+impl Display for Address {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Address::Ipv4(addr) => write!(f, "{}", addr),
+            Address::Ipv6(addr) => write!(f, "{}", addr),
+            Address::OnionV3(addr, p) => {
+                let str_addr = String::from_utf8(addr.to_vec()).unwrap_or_else(|_| format!("{:?}", addr));
+                write!(f, "{}:{}", str_addr, p)
+            },
+        }
+    }
 }
 
 fn ipv6_to_be(addr: [u16; 8]) -> [u16; 8] {
@@ -210,11 +264,23 @@ impl Encodable for Address {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct Version {
     pub major: u16, // used only 10 bits
     pub minor: u16,
     pub patch: u16,
+}
+
+impl Default for Version {
+    fn default() -> Self {
+        Version::current()
+    }
+}
+
+impl Display for Version {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
+    }
 }
 
 impl Version {
@@ -253,7 +319,7 @@ impl Version {
 }
 impl_pure_encodable!(Version, unpack_be, pack_be);
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum Message {
     Version(VersionMessage),
     VersionAck,
@@ -270,6 +336,57 @@ pub enum Message {
     Pong([u8;8]),
     GetRates(Vec<RateReq>),
     Rates(Vec<RateResp>),
+}
+
+fn fmt_vec<T: Display>(v: &Vec<T>, f: &mut Formatter) -> std::fmt::Result {
+    for (i, b) in v.iter().enumerate() {
+        if i == v.len()-1 {
+            write!(f, "{}", b)?;
+        } else {
+            write!(f, "{}, ", b)?;
+        }
+    }
+    Ok(())
+}
+
+impl Display for Message {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Message::Version(msg) => msg.fmt(f),
+            Message::VersionAck => write!(f, "verack"),
+            Message::GetFilters(msg) => msg.fmt(f),
+            Message::Filters(msg) => msg.fmt(f),
+            Message::Filter(msg) => msg.fmt(f),
+            Message::GetPeers => write!(f, "reqpeers"),
+            Message::Peers(msg) => {
+                write!(f, "peers: ")?;
+                fmt_vec(msg, f)
+            }
+            Message::GetFee(msg) => {
+                write!(f, "reqfee: ")?;
+                fmt_vec(msg, f)
+            }
+            Message::Fee(msg) => {
+                write!(f, "fee: ")?;
+                fmt_vec(msg, f)
+            }
+            Message::PeerIntroduce(msg) => {
+                write!(f, "peer announce: ")?;
+                fmt_vec(msg, f)
+            }
+            Message::Reject(msg) => msg.fmt(f),
+            Message::Ping(nonce) => write!(f, "ping {}", nonce.to_hex()),
+            Message::Pong(nonce) => write!(f, "pong {}", nonce.to_hex()),
+            Message::GetRates(msg) => {
+                write!(f, "req rates: ")?;
+                fmt_vec(msg, f)
+            }
+            Message::Rates(msg) => {
+                write!(f, "rates: ")?;
+                fmt_vec(msg, f)
+            }
+        }
+    }
 }
 
 /// Maximum size of message in bytes
@@ -293,6 +410,28 @@ impl Message {
             Message::Pong(_) => 12,
             Message::GetRates(_) => 13,
             Message::Rates(_) => 14,
+        }
+    }
+
+    /// Get human readable name of message by its type id
+    pub fn name_from_id(i: u32) -> Option<&'static str> {
+        match i {
+            0 => Some("version"),
+            1 => Some("version ack"),
+            2 => Some("req filters"),
+            3 => Some("filters"),
+            4 => Some("filter"),
+            5 => Some("req peers"),
+            6 => Some("peers"),
+            7 => Some("req fee"),
+            8 => Some("fee"),
+            9 => Some("peer announce"),
+            10 => Some("reject"),
+            11 => Some("ping"),
+            12 => Some("pong"),
+            13 => Some("req rates"),
+            14 => Some("rates"),
+            _ => None,
         }
     }
 }
@@ -413,12 +552,18 @@ impl Decodable for Message {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct ScanBlock {
     pub currency: Currency,
     pub version: Version,
     pub scan_height: u64,
     pub height: u64,
+}
+
+impl Display for ScanBlock {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} (v{}) {}/{}", self.currency, self.version, self.scan_height, self.height)
+    }
 }
 
 impl Encodable for ScanBlock {
@@ -451,13 +596,21 @@ impl Decodable for ScanBlock {
 }
 
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct VersionMessage {
     pub version: Version,
     pub time: u64,
     pub nonce: [u8; 8],
     pub scan_blocks: Vec<ScanBlock>,
 }
+
+impl Display for VersionMessage {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "Version {} at {} with nonce {} and currencies:", self.version, self.time, self.nonce.to_hex())?;
+        fmt_vec(&self.scan_blocks, f)
+    }
+}
+
 
 impl Encodable for VersionMessage {
     #[inline]
@@ -488,11 +641,17 @@ impl Decodable for VersionMessage {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct FiltersReq {
     pub currency: Currency,
     pub start: u64,
     pub amount: u32,
+}
+
+impl Display for FiltersReq {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "req {} {} filters from {}", self.amount, self.currency, self.start)
+    }
 }
 
 impl Encodable for FiltersReq {
@@ -522,10 +681,16 @@ impl Decodable for FiltersReq {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct Filter {
     pub block_id: Vec<u8>,
     pub filter: Vec<u8>,
+}
+
+impl Display for Filter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Block {}, filter {}", self.block_id.to_hex(), self.filter.to_hex())
+    }
 }
 
 impl Encodable for Filter {
@@ -555,10 +720,17 @@ impl Decodable for Filter {
 }
 
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct FiltersResp {
     pub currency: Currency,
     pub filters: Vec<Filter>
+}
+
+impl Display for FiltersResp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Filters for {}:", self.currency)?;
+        fmt_vec(&self.filters, f)
+    }
 }
 
 impl Encodable for FiltersResp {
@@ -610,12 +782,18 @@ impl Decodable for FiltersResp {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct FilterEvent {
     pub currency: Currency,
     pub height: u64,
     pub block_id: Vec<u8>,
     pub filter: Vec<u8>,
+}
+
+impl Display for FilterEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "New {} filter at height {} and id {}, body: {}", self.currency, self.height, self.block_id.to_hex(), self.filter.to_hex())
+    }
 }
 
 impl Encodable for FilterEvent {
@@ -649,7 +827,7 @@ impl Decodable for FilterEvent {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct FeeBtc {
     pub fast_conserv: u64,
     pub fast_econom: u64,
@@ -657,6 +835,14 @@ pub struct FeeBtc {
     pub moderate_econom: u64,
     pub cheap_conserv: u64,
     pub cheap_econom: u64,
+}
+
+impl Display for FeeBtc {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Fast(conservative {} sat/byte, econom {} sat/byte)", self.fast_conserv, self.fast_econom)?;
+        writeln!(f, "Moderate(conservative {} sat/byte, econom {} sat/byte)", self.moderate_conserv, self.moderate_econom)?;
+        writeln!(f, "Cheap(conservative {} sat/byte, econom {} sat/byte)", self.cheap_conserv, self.cheap_econom)
+    }
 }
 
 impl Encodable for FeeBtc {
@@ -692,11 +878,19 @@ impl Decodable for FeeBtc {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct FeeOther {
     pub fast: u64,
     pub moderate: u64,
     pub cheap: u64,
+}
+
+impl Display for FeeOther {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Fast {} unit/byte", self.fast)?;
+        writeln!(f, "Moderate {} unit/byte", self.moderate)?;
+        writeln!(f, "Cheap {} unit/byte", self.cheap)
+    }
 }
 
 impl Encodable for FeeOther {
@@ -726,10 +920,25 @@ impl Decodable for FeeOther {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum FeeResp {
-    FeeBtc((Currency, FeeBtc)),
-    FeeOther((Currency, FeeOther)),
+    Btc((Currency, FeeBtc)),
+    Other((Currency, FeeOther)),
+}
+
+impl Display for FeeResp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FeeResp::Btc((cur, fee)) => {
+                writeln!(f, "Fee for {}", cur)?;
+                fee.fmt(f)
+            }
+            FeeResp::Other((cur, fee)) => {
+                writeln!(f, "Fee for {}", cur)?;
+                fee.fmt(f)
+            }
+        }
+    }
 }
 
 impl Encodable for FeeResp {
@@ -740,12 +949,12 @@ impl Encodable for FeeResp {
     ) -> Result<usize, io::Error> {
         let mut len = 0;
         match self {
-            FeeResp::FeeBtc((currency, fee)) => {
+            FeeResp::Btc((currency, fee)) => {
                 assert_eq!(*currency == Currency::Btc || *currency == Currency::TBtc, true, "FeeBtc currency must be Btc or TBtc!");
                 len += currency.consensus_encode(&mut s)?;
                 len += fee.consensus_encode(&mut s)?
             },
-            FeeResp::FeeOther((currency, fee)) => {
+            FeeResp::Other((currency, fee)) => {
                 len += currency.consensus_encode(&mut s)?;
                 len += fee.consensus_encode(&mut s)?
             }
@@ -761,13 +970,13 @@ impl Decodable for FeeResp {
     ) -> Result<FeeResp, consensus_encode::Error> {
         let cur = Currency::consensus_decode(&mut d)?;
         match cur {
-            Currency::Btc | Currency::TBtc => Ok(FeeResp::FeeBtc((cur, Decodable::consensus_decode(&mut d)?))),
-            _ => Ok(FeeResp::FeeOther((cur, Decodable::consensus_decode(&mut d)?))),
+            Currency::Btc | Currency::TBtc => Ok(FeeResp::Btc((cur, Decodable::consensus_decode(&mut d)?))),
+            _ => Ok(FeeResp::Other((cur, Decodable::consensus_decode(&mut d)?))),
         }
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum RejectData {
     HeaderParsing,
     PayloadParsing,
@@ -775,6 +984,19 @@ pub enum RejectData {
     ZeroBytesReceived,
     VersionNotSupported,
     Unknown(u32),
+}
+
+impl Display for RejectData {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RejectData::HeaderParsing => write!(f, "header parsing"),
+            RejectData::PayloadParsing => write!(f, "payload parsing"),
+            RejectData::InternalError => write!(f, "internal error"),
+            RejectData::ZeroBytesReceived => write!(f, "got zero bytes"),
+            RejectData::VersionNotSupported => write!(f, "version is not supported"),
+            RejectData::Unknown(i) => write!(f, "unknown error {}", i),
+        }
+    }
 }
 
 impl RejectData {
@@ -810,11 +1032,17 @@ impl RejectData {
 }
 impl_pure_encodable!(RejectData, unpack, pack);
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct RejectMessage {
     pub id: u32,
     pub data: RejectData,
     pub message: String,
+}
+
+impl Display for RejectMessage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "reject {} for {}, reason: {}", self.data, Message::name_from_id(self.id).unwrap_or("unknown"), self.message)
+    }
 }
 
 impl Encodable for RejectMessage {
@@ -844,10 +1072,17 @@ impl Decodable for RejectMessage {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct RateReq {
     pub currency: Currency,
     pub fiats: Vec<Fiat>,
+}
+
+impl Display for RateReq {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} for ", self.currency)?;
+        fmt_vec(&self.fiats, f)
+    }
 }
 
 impl Encodable for RateReq {
@@ -902,10 +1137,16 @@ impl Decodable for RateWord {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct FiatRate {
     pub fiat: Fiat,
     pub rate: Rate,
+}
+
+impl Display for FiatRate {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.rate.bits as f64 / 100.0, self.fiat)
+    }
 }
 
 impl Encodable for FiatRate {
@@ -934,10 +1175,17 @@ impl Decodable for FiatRate {
 }
 
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct RateResp {
     pub currency: Currency,
     pub rates: Vec<FiatRate>
+}
+
+impl Display for RateResp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} rates: ", self.currency)?;
+        fmt_vec(&self.rates, f)
+    }
 }
 
 impl Encodable for RateResp {
@@ -1126,7 +1374,7 @@ mod test {
     #[test]
     fn fee_resp_test() {
         let msg = Message::Fee(vec![
-                FeeResp::FeeBtc((Currency::Btc, FeeBtc {
+                FeeResp::Btc((Currency::Btc, FeeBtc {
                     fast_conserv: 4,
                     fast_econom: 8,
                     moderate_conserv: 15,
@@ -1134,7 +1382,7 @@ mod test {
                     cheap_conserv: 23,
                     cheap_econom: 42,
                 })),
-                FeeResp::FeeOther((Currency::Dash, FeeOther {
+                FeeResp::Other((Currency::Dash, FeeOther {
                     fast: 4,
                     moderate: 8,
                     cheap: 15,
