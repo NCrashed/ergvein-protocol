@@ -1330,6 +1330,41 @@ mod test {
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
     }
 
+    struct Header {
+        message_id: u32,
+        message_length: u64,
+        message_payload: Vec<u8>,
+    }
+
+    impl Encodable for Header {
+        #[inline]
+        fn consensus_encode<S: io::Write>(
+            &self,
+            mut s: S,
+        ) -> Result<usize, io::Error> {
+            let mut len = 0;
+            len += VarInt(self.message_id as u64).consensus_encode(&mut s)?;
+            len += VarInt(self.message_length).consensus_encode(&mut s)?;
+            len += self.message_payload.consensus_encode(&mut s)?;
+            Ok(len)
+        }
+    }
+
+    impl Decodable for Header {
+        #[inline]
+        fn consensus_decode<D: ::std::io::Read>(
+            mut d: D,
+        ) -> Result<Header, consensus_encode::Error> {
+            let id = VarInt::consensus_decode(&mut d)?.0 as u32;
+            let len = VarInt::consensus_decode(&mut d)?.0 as u64;
+
+            let mut buf = vec![0; len as usize];
+            d.read_exact(&mut buf)?;
+
+            Ok(Header{ message_id: id, message_length: len, message_payload: buf })
+        }
+    }
+
     #[test]
     fn filters_resp_test() {
         let msg = Message::Filters(FiltersResp {
@@ -1346,8 +1381,13 @@ mod test {
             ],
         });
         let bytes = Vec::from_hex("032b00021f8b080000000000000333343236313533b730c441b3242625a71811529406040096e289844a000000").unwrap();
+        let our_bytes = serialize(&msg);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
-        assert_eq!(deserialize::<Message>(&serialize(&msg)).unwrap(), msg);
+        assert_eq!(deserialize::<Message>(&our_bytes).unwrap(), msg);
+
+        let header = deserialize::<Header>(&our_bytes).unwrap();
+        assert_eq!(header.message_id, 3);
+        assert_eq!(header.message_length, header.message_payload.len() as u64);
     }
 
     #[test]
