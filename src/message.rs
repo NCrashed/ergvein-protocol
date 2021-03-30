@@ -1233,6 +1233,11 @@ mod test {
     }
 
     #[test]
+    fn version_compat_self() {
+        assert!(Version::current().compatible(&Version::current()), "Version is compatible to self");
+    }
+
+    #[test]
     fn address_test_v4() {
         let addr = Address::Ipv4(net::SocketAddrV4::new(net::Ipv4Addr::new(127, 0, 0, 1), 4142));
         let bytes = vec![0, 127, 0, 0, 1, 0x10, 0x2E];
