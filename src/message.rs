@@ -1283,6 +1283,26 @@ mod test {
     }
 
     #[test]
+    fn version_msg_test_failed_version() {
+        let msg = Message::Version(VersionMessage {
+            version: Version { major: 2, minor: 0, patch: 0},
+            time: 1617118704,
+            nonce: [25, 218, 220, 43, 225, 52, 200, 125],
+            scan_blocks: vec![
+                ScanBlock {
+                    currency: Currency::Btc,
+                    version: Version { major: 1, minor: 0, patch: 0},
+                    scan_height: 677013,
+                    height: 677013,
+                },
+            ],
+        });
+        let bytes = Vec::from_hex("002400000008f04563600000000019dadc2be134c87d010000000004fe95540a00fe95540a00").unwrap();
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+        assert_eq!(serialize(&msg), bytes);
+    }
+
+    #[test]
     fn verack_msg_test() {
         let msg = Message::VersionAck;
         let bytes = Vec::from_hex("01").unwrap();
