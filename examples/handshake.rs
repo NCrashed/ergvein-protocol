@@ -8,9 +8,6 @@ use std::io::Write;
 
 use rand::{thread_rng, Rng};
 use ergvein_protocol::message::*;
-// use bitcoin::network::stream_reader::StreamReader;
-// use bitcoin::secp256k1;
-// use bitcoin::secp256k1::rand::Rng;
 
 fn main() {
     // This example establishes a connection to a Bitcoin node, sends the intial

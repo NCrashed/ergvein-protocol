@@ -1355,6 +1355,18 @@ mod test {
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
     }
 
+    #[test]
+    fn filters_req_test2() {
+        let msg = Message::GetFilters(FiltersReq {
+            currency: Currency::Btc,
+            start: 400000,
+            amount: 300,
+        });
+        let bytes = Vec::from_hex("020900fe801a0600fd2c01").unwrap();
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+        assert_eq!(serialize(&msg), bytes);
+    }
+
     struct Header {
         message_id: u32,
         message_length: u64,
