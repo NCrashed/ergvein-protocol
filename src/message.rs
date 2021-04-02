@@ -726,6 +726,22 @@ pub struct FiltersResp {
     pub filters: Vec<Filter>
 }
 
+impl FiltersResp {
+    pub fn compress<'a, I: Iterator<Item=&'a Filter>>(filters: I) -> Result<Vec<u8>, io::Error> {
+        let mut e = GzEncoder::new(Vec::new(), Compression::default());
+        for f in filters {
+            e.write_all(&serialize(&f))?;
+        }
+        e.finish()
+    }
+
+    pub fn decompress(buf: &Vec<u8>) -> Result<Vec<u8>, io::Error> {
+        let mut gz = GzDecoder::new(Vec::new());
+        gz.write_all(&buf)?;
+        gz.finish()
+    }
+}
+
 impl Display for FiltersResp {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Filters for {}:", self.currency)?;
@@ -743,11 +759,7 @@ impl Encodable for FiltersResp {
         len += self.currency.consensus_encode(&mut s)?;
         len += VarInt(self.filters.len() as u64).consensus_encode(&mut s)?;
 
-        let mut e = GzEncoder::new(Vec::new(), Compression::default());
-        for f in &self.filters {
-            e.write_all(&serialize(&f))?;
-        }
-        let compressed_bytes = e.finish()?;
+        let compressed_bytes = FiltersResp::compress(self.filters.iter())?;
         s.write_all(&compressed_bytes)?;
         len += compressed_bytes.len();
 
@@ -765,9 +777,7 @@ impl Decodable for FiltersResp {
 
         let mut buf = vec![];
         d.read_to_end(&mut buf)?;
-        let mut gz = GzDecoder::new(Vec::new());
-        gz.write_all(&buf)?;
-        let uncompressed = gz.finish()?;
+        let uncompressed = FiltersResp::decompress(&mut buf)?;
 
         let mut decoder = Cursor::new(uncompressed);
         let mut fs = vec![];
