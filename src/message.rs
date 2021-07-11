@@ -336,6 +336,13 @@ pub enum Message {
     Pong([u8;8]),
     GetRates(Vec<RateReq>),
     Rates(Vec<RateResp>),
+    FullFilterInv,
+    GetFullFilter,
+    FullFilter(MemFilter),
+    GetMemFilters,
+    MemFilters(Vec<FilterPrefixPair>),
+    GetMempool(Vec<TxPrefix>),
+    MempoolChunk(MempoolChunkResp)
 }
 
 fn fmt_vec<T: Display>(v: &Vec<T>, f: &mut Formatter) -> std::fmt::Result {
@@ -385,6 +392,25 @@ impl Display for Message {
                 write!(f, "rates: ")?;
                 fmt_vec(msg, f)
             }
+            Message::FullFilterInv => write!(f, "fullfilterinv"),
+            Message::GetFullFilter => write!(f, "getfullfilter"),
+            Message::FullFilter(msg) => {
+                write!(f, "fullfilter: ")?;
+                msg.fmt(f)
+            },
+            Message::GetMemFilters => write!(f, "getmemfilters"),
+            Message::MemFilters(msg) => {
+                write!(f, "memfilters: ")?;
+                fmt_vec(msg, f)
+            },
+            Message::GetMempool(msg) => {
+                write!(f, "getmempool: ")?;
+                fmt_vec(msg, f)
+            }
+            Message::MempoolChunk(msg) => {
+                write!(f, "mempoolchunk: ")?;
+                msg.fmt(f)
+            }
         }
     }
 }
@@ -410,6 +436,13 @@ impl Message {
             Message::Pong(_) => 12,
             Message::GetRates(_) => 13,
             Message::Rates(_) => 14,
+            Message::FullFilterInv => 15,
+            Message::GetFullFilter => 16,
+            Message::FullFilter(_) => 17,
+            Message::GetMemFilters => 18,
+            Message::MemFilters(_) => 19,
+            Message::GetMempool(_) => 20,
+            Message::MempoolChunk(_) => 21,
         }
     }
 
@@ -431,6 +464,12 @@ impl Message {
             12 => Some("pong"),
             13 => Some("req rates"),
             14 => Some("rates"),
+            15 => Some("full filter inv"),
+            17 => Some("full fulter"),
+            18 => Some("get mempool filters"),
+            19 => Some("mempool filters"),
+            20 => Some("get mempool"),
+            21 => Some("mempool chunk"),
             _ => None,
         }
     }
@@ -473,6 +512,13 @@ impl Encodable for Message {
             Message::Pong(msg) => len += write_payload(&mut s, msg)?,
             Message::GetRates(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
             Message::Rates(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
+            Message::FullFilterInv => (),
+            Message::GetFullFilter => (),
+            Message::FullFilter(msg) => len += write_payload(&mut s, msg)?,
+            Message::GetMemFilters => (),
+            Message::MemFilters(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
+            Message::GetMempool(msg) => len += write_payload(&mut s, &LengthVecRef(msg))?,
+            Message::MempoolChunk(msg) => len += write_payload(&mut s, msg)?,
         }
         Ok(len)
     }
@@ -545,6 +591,21 @@ impl Decodable for Message {
             }),
             14 => read_payload(&mut d, |buf| {
                 Ok(Message::Rates(deserialize::<LengthVec<RateResp>>(&buf)?.0))
+            }),
+            15 => Ok(Message::FullFilterInv),
+            16 => Ok(Message::GetFullFilter),
+            17 => read_payload(&mut d, |buf| {
+                Ok(Message::FullFilter(deserialize::<MemFilter>(&buf)?))
+            }),
+            18 => Ok(Message::GetMemFilters),
+            19 => read_payload(&mut d, |buf| {
+                Ok(Message::MemFilters(deserialize::<LengthVec<FilterPrefixPair>>(&buf)?.0))
+            }),
+            20 => read_payload(&mut d, |buf| {
+                Ok(Message::GetMempool(deserialize::<LengthVec<TxPrefix>>(&buf)?.0))
+            }),
+            21 => read_payload(&mut d, |buf| {
+                Ok(Message::MempoolChunk(deserialize::<MempoolChunkResp>(&buf)?))
             }),
             _ => Err(Error::ParseFailed("Unknown message type")),
         }
@@ -1223,10 +1284,164 @@ impl Decodable for RateResp {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct MemFilter(Vec<u8>);
+
+impl MemFilter{
+    pub fn compress(&self) -> Result<Vec<u8>, io::Error> {
+        let mut e = GzEncoder::new(Vec::new(), Compression::default());
+        e.write_all(&self.0)?;
+        e.finish()
+    }
+
+    pub fn decompress(buf: &Vec<u8>) -> Result<MemFilter, io::Error> {
+        let mut gz = GzDecoder::new(Vec::new());
+        gz.write_all(&buf)?;
+        gz.finish().map(|filter| MemFilter(filter))
+    }
+}
+
+impl Display for MemFilter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result{
+        write!(f, "Mempool filter {}", self.0.to_hex())
+    }
+}
+
+impl Encodable for MemFilter {
+    #[inline]
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S,
+    ) -> Result<usize, io::Error> {
+        let compressed = self.compress()?;
+        let len = compressed.consensus_encode(&mut s)?;
+        Ok(len)
+    }
+}
+
+impl Decodable for MemFilter {
+    #[inline]
+    fn consensus_decode<D: io::Read>(
+        mut d: D,
+    ) -> Result<MemFilter, consensus_encode::Error> {
+        let buf : Vec<u8> = Decodable::consensus_decode(&mut d)?;
+        MemFilter::decompress(&buf).map_err(|e| consensus_encode::Error::Io(e))
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct TxPrefix([u8;2]);
+
+impl Display for TxPrefix {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result{
+        write!(f, "Prefix: {}", self.0.to_hex())
+    }
+}
+
+impl Encodable for TxPrefix{
+    #[inline]
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S
+    ) -> Result<usize, io::Error> {
+        self.0.consensus_encode(&mut s)
+    }
+}
+
+impl Decodable for TxPrefix {
+    #[inline]
+    fn consensus_decode<D: io::Read>(
+        mut d: D,
+    ) -> Result<TxPrefix, consensus_encode::Error> {
+        Decodable::consensus_decode(&mut d).map(|p| TxPrefix(p))
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct FilterPrefixPair {
+    pub prefix: TxPrefix,
+    pub filter: MemFilter
+}
+
+impl Display for FilterPrefixPair{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result{
+        write!(f, "Prefix: {:?}; ", self.prefix)?;
+        self.filter.fmt(f)
+    }
+}
+
+impl Encodable for FilterPrefixPair{
+    #[inline]
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S
+    ) -> Result<usize, io::Error> {
+        let mut len = 0;
+        len += self.prefix.consensus_encode(&mut s)?;
+        len += self.filter.consensus_encode(&mut s)?;
+        Ok(len)
+    }
+}
+
+impl Decodable for FilterPrefixPair {
+    #[inline]
+    fn consensus_decode<D: io::Read>(
+        mut d: D,
+    ) -> Result<FilterPrefixPair, consensus_encode::Error> {
+        let prefix = Decodable::consensus_decode(&mut d)?;
+        let filter = Decodable::consensus_decode(&mut d)?;
+        Ok(FilterPrefixPair{prefix, filter})
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct MempoolChunkResp {
+    pub prefix: TxPrefix,
+    pub amount: u32,
+    pub data: Vec<u8> //byte repersentation of transactions
+}
+
+impl Display for MempoolChunkResp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f,"Mempool chunk for: {}", self.prefix)
+    }
+}
+
+impl Encodable for MempoolChunkResp {
+    fn consensus_encode<S: io::Write>(
+        &self,
+        mut s: S
+    ) -> Result<usize, io::Error> {
+        let mut len = 0;
+        let mut e = GzEncoder::new(Vec::new(), Compression::default());
+        e.write_all(&self.data)?;
+        let data = e.finish()?;
+
+        len += self.prefix.consensus_encode(&mut s)?;
+        len += VarInt(self.amount as u64).consensus_encode(&mut s)?;
+        len += data.consensus_encode(&mut s)?;
+        Ok(len)
+    }
+}
+
+impl Decodable for MempoolChunkResp {
+    fn consensus_decode<D: io::Read>(
+        mut d: D
+    ) -> Result<Self, Error> {
+        let prefix = Decodable::consensus_decode(&mut d)?;
+        let amount = VarInt::consensus_decode(&mut d)?.0 as u32;
+        let buf : Vec<u8> = Decodable::consensus_decode(&mut d)?;
+        let mut gz = GzDecoder::new(Vec::new());
+        gz.write_all(&buf)?;
+        gz.finish().map(|data| MempoolChunkResp{prefix, amount, data}).map_err(|e| Error::Io(e))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use consensus_encode::util::hex::FromHex;
+    use rand::Rng;
 
     #[test]
     fn version_test_1() {
@@ -1552,4 +1767,97 @@ mod test {
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
     }
 
+    #[test]
+    fn full_filter_inv_test() {
+        let msg = Message::FullFilterInv;
+        let bytes = Vec::from_hex("0f").unwrap();
+        assert_eq!(serialize(&msg), bytes);
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+    }
+
+    #[test]
+    fn get_full_filter_test() {
+        let msg = Message::GetFullFilter;
+        let bytes = Vec::from_hex("10").unwrap();
+        assert_eq!(serialize(&msg), bytes);
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+    }
+
+    #[test]
+    fn full_filter_test(){
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let mut f : Vec<u8> = Vec::new();
+            let n = rng.gen_range(0..1024);
+            (0..n).for_each(|_| {
+                f.push(rng.gen());
+            });
+            let msg = Message::FullFilter(MemFilter(f));
+            let bytes = serialize(&msg);
+            assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+        }
+    }
+
+    #[test]
+    fn get_mem_filters_test(){
+        let msg = Message::GetMemFilters;
+        let bytes = Vec::from_hex("12").unwrap();
+        assert_eq!(serialize(&msg), bytes);
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+    }
+
+    #[test]
+    fn mem_filters_test(){
+        let mut rng = rand::thread_rng();
+        for _ in 0..10 {
+            let mut fps : Vec<FilterPrefixPair> = Vec::new();
+            let n = rng.gen_range(0..1024);
+            (0..n).for_each(|_|{
+                let prefix = TxPrefix(rng.gen());
+                let m = rng.gen_range(0..1024);
+                let mut f : Vec<u8> = Vec::with_capacity(m);
+                (0..m).for_each(|_| {
+                    f.push(rng.gen());
+                });
+                let filter = MemFilter(f);
+                let fp = FilterPrefixPair{prefix, filter};
+                fps.push(fp)
+            });
+            let msg = Message::MemFilters(fps);
+            let bytes = serialize(&msg);
+            assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+        }
+    }
+
+    #[test]
+    fn get_mempool_test(){
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let mut prefs : Vec<[u8;2]> = Vec::new();
+            let n = rng.gen_range(0..1024);
+            (0..n).for_each(|_| {
+                prefs.push(rng.gen());
+            });
+            let msg = Message::GetMempool(prefs.iter().map(|p| TxPrefix(p.clone())).collect());
+            let bytes = serialize(&msg);
+            assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+        }
+    }
+
+    #[test]
+    fn mempool_chunk_test(){
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let prefix = TxPrefix(rng.gen());
+            let amount: u32 = rng.gen_range(1..102);
+            let mut data: Vec<u8> = Vec::new();
+            (0..amount).for_each(|_|{
+                let l = rng.gen_range(1..256);
+                (0..l).for_each(|_|{data.push(rng.gen())})
+            });
+            let msg = Message::MempoolChunk(MempoolChunkResp{prefix, amount, data});
+            let bytes = serialize(&msg);
+            assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+        }
+    }
 }
