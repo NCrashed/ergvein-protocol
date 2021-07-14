@@ -1394,7 +1394,6 @@ impl Decodable for FilterPrefixPair {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct MempoolChunkResp {
     pub prefix: TxPrefix,
-    pub amount: u32,
     pub txs: Vec<Vec<u8>> //byte repersentation of transactions
 }
 
@@ -1428,7 +1427,7 @@ impl Encodable for MempoolChunkResp {
     ) -> Result<usize, io::Error> {
         let mut len = 0;
         len += self.prefix.consensus_encode(&mut s)?;
-        len += VarInt(self.amount as u64).consensus_encode(&mut s)?;
+        len += VarInt(self.txs.len() as u64).consensus_encode(&mut s)?;
         let compressed_bytes = MempoolChunkResp::compress(self.txs.iter())?;
         s.write_all(&compressed_bytes)?;
         len += compressed_bytes.len();
@@ -1452,7 +1451,7 @@ impl Decodable for MempoolChunkResp {
             txs.push(LengthVec::consensus_decode(&mut decoder)?.0);
         }
 
-        Ok(MempoolChunkResp{prefix, amount, txs})
+        Ok(MempoolChunkResp{prefix, txs})
     }
 }
 

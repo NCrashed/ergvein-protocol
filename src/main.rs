@@ -72,14 +72,14 @@ fn main() {
 
     let mut data : Vec<Vec<u8>> = Vec::new();
     let tx = Vec::from_hex("02000000000101261560a27330e73b46351ac349ff35136f614d4dfdfb3a108fa85c140a1c61a901000000171600149fd77bca5b9369478c80dc5c5cc4101f7baf5a95feffffff0254c410000000000017a914ba906b3da20467de78552d0c089e3754f49f62688740420f000000000017a9140f912a6fc7ba91305934dba0ef566cbfc62fd2218702473044022045d75032c9f3806939ff10ffd79a040bdcbece2f90cb1dc95e3a3b7cf109da1e022012a37cc4fee1ff9ae19c6adf7d0bc84a122b5ce33d5c43bebff52a6796d512340121025609c093b93e3d4a003ebb0ec8e58700d12e6f05c0c1096f18ba3ef8ff931fca260d1b00").unwrap();
-    data.push(bitcoin::consensus::encode::serialize(&tx));
-    data.push(bitcoin::consensus::encode::serialize(&tx));
-    data.push(bitcoin::consensus::encode::serialize(&tx));
-    data.push(bitcoin::consensus::encode::serialize(&tx));
-    data.push(bitcoin::consensus::encode::serialize(&tx));
-    data.push(bitcoin::consensus::encode::serialize(&tx));
+    data.push(tx.clone().clone());
+    data.push(tx.clone().clone());
+    data.push(tx.clone().clone());
+    data.push(tx.clone().clone());
+    data.push(tx.clone().clone());
+    data.push(tx.clone().clone());
 
-    let chunk = MempoolChunkResp {prefix: TxPrefix([9, 128]), amount: data.len() as u32, txs: data};
+    let chunk = MempoolChunkResp {prefix: TxPrefix([9, 128]), txs: data};
     let full_filter_inv = Message::FullFilterInv;
     let get_full_filter = Message::GetFullFilter;
     let get_mem_filters = Message::GetMemFilters;
@@ -104,25 +104,25 @@ fn main() {
     println!("mempool_chunk        {}:{}:{}", chunk.prefix, chunk.amount, chunk.txs[0].to_hex());
     let a = consensus_encode::deserialize::<Message>(&serialize(&mempool_chunk)).map(|v| v == Message::MempoolChunk(chunk.clone()));
     println!("ISEQ {:?}",a);
-    println!("\n\n\n\n{}", tx.to_hex());
+    println!("\n\n\n\n{}", tx.clone().to_hex());
 
-    let mut e = GzEncoder::new(Vec::new(), Compression::default());
-    e.write_all(&serialize(&tx)).unwrap();
-    let enc = e.finish().unwrap();
+    // let mut e = GzEncoder::new(Vec::new(), Compression::default());
+    // e.write_all(&serialize(&tx)).unwrap();
+    // let enc = e.finish().unwrap();
+    //
+    // let mut gz = GzDecoder::new(Vec::new());
+    // gz.write_all(&enc).unwrap();
+    // let tx2 : Vec<u8> = consensus_encode::deserialize(&gz.finish().unwrap()).unwrap();
+    // println!("\n\n\n\n{}", tx == tx2);
+    // println!("\n\n\n\n{}", enc.to_hex());
 
-    let mut gz = GzDecoder::new(Vec::new());
-    gz.write_all(&enc).unwrap();
-    let tx2 : Vec<u8> = consensus_encode::deserialize(&gz.finish().unwrap()).unwrap();
-    println!("\n\n\n\n{}", tx == tx2);
-    println!("\n\n\n\n{}", enc.to_hex());
-
-    println!("{:?}", tx);
+    println!("{:?}", tx.clone());
 
     println!("\n\n\n\n");
 
     let v = Vec::from_hex("123aef32f21a2e7d9c").unwrap();
     let mut e = GzEncoder::new(Vec::new(), Compression::default());
-    e.write_all(&serialize(&v)).unwrap();
+    e.write_all(&v).unwrap();
     let enc = e.finish().unwrap();
     println!("\n\n\n\n{}", enc.to_hex());
 
