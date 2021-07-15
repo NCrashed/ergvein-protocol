@@ -79,7 +79,7 @@ impl Display for Currency {
 }
 
 impl Currency {
-    pub fn to_index(&self) -> u32 {
+    pub fn as_index(&self) -> u32 {
         match self {
             Currency::Btc => 0,
             Currency::TBtc => 1,
@@ -120,7 +120,7 @@ impl Currency {
     }
 
     fn pack(&self) -> VarInt {
-        VarInt(self.to_index() as u64)
+        VarInt(self.as_index() as u64)
     }
 
     fn unpack(i: VarInt) -> Self {
@@ -149,7 +149,7 @@ impl Display for Fiat {
 }
 
 impl Fiat {
-    pub fn to_index(&self) -> u32 {
+    pub fn as_index(&self) -> u32 {
         match self {
             Fiat::Usd => 0,
             Fiat::Eur => 1,
@@ -168,7 +168,7 @@ impl Fiat {
     }
 
     fn pack(&self) -> VarInt {
-        VarInt(self.to_index() as u64)
+        VarInt(self.as_index() as u64)
     }
 
     fn unpack(i: VarInt) -> Self {
@@ -245,25 +245,25 @@ impl Encodable for Address {
     fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         match self {
             Address::Ipv4(sock) => {
-                let t: u8 = 0;
-                let l = Encodable::consensus_encode(&t, &mut s)?
+                let addr_type: u8 = 0;
+                let len = Encodable::consensus_encode(&addr_type, &mut s)?
                     + Encodable::consensus_encode(&sock.ip().octets(), &mut s)?
                     + Encodable::consensus_encode(&sock.port().to_be(), &mut s)?;
-                Ok(l)
+                Ok(len)
             }
             Address::Ipv6(sock) => {
-                let t: u8 = 1;
-                let l = Encodable::consensus_encode(&t, &mut s)?
+                let addr_type: u8 = 1;
+                let len = Encodable::consensus_encode(&addr_type, &mut s)?
                     + Encodable::consensus_encode(&sock.ip().octets(), &mut s)?
                     + Encodable::consensus_encode(&sock.port().to_be(), &mut s)?;
-                Ok(l)
+                Ok(len)
             }
             Address::OnionV3(b, p) => {
-                let t: u8 = 2;
-                let l = Encodable::consensus_encode(&t, &mut s)?
+                let addr_type: u8 = 2;
+                let len = Encodable::consensus_encode(&addr_type, &mut s)?
                     + s.write(b)?
                     + Encodable::consensus_encode(&p.to_be(), &mut s)?;
-                Ok(l)
+                Ok(len)
             }
         }
     }
@@ -354,7 +354,7 @@ pub enum Message {
     MempoolChunk(MempoolChunkResp),
 }
 
-fn fmt_vec<T: Display>(v: &Vec<T>, f: &mut Formatter) -> std::fmt::Result {
+fn fmt_vec<T: Display>(v: &[T], f: &mut Formatter) -> std::fmt::Result {
     for (i, b) in v.iter().enumerate() {
         if i == v.len() - 1 {
             write!(f, "{}", b)?;
@@ -805,7 +805,7 @@ impl FiltersResp {
         e.finish()
     }
 
-    pub fn decompress(buf: &Vec<u8>) -> Result<Vec<u8>, io::Error> {
+    pub fn decompress(buf: &[u8]) -> Result<Vec<u8>, io::Error> {
         let mut gz = GzDecoder::new(Vec::new());
         gz.write_all(&buf)?;
         gz.finish()
@@ -842,7 +842,7 @@ impl Decodable for FiltersResp {
 
         let mut buf = vec![];
         d.read_to_end(&mut buf)?;
-        let uncompressed = FiltersResp::decompress(&mut buf)?;
+        let uncompressed = FiltersResp::decompress(&buf)?;
 
         let mut decoder = Cursor::new(uncompressed);
         let mut fs = vec![];
@@ -1029,9 +1029,8 @@ impl Encodable for FeeResp {
         let mut len = 0;
         match self {
             FeeResp::Btc((currency, fee)) => {
-                assert_eq!(
+                assert!(
                     *currency == Currency::Btc || *currency == Currency::TBtc,
-                    true,
                     "FeeBtc currency must be Btc or TBtc!"
                 );
                 len += currency.consensus_encode(&mut s)?;
@@ -1286,10 +1285,10 @@ impl MemFilter {
         e.finish()
     }
 
-    pub fn decompress(buf: &Vec<u8>) -> Result<MemFilter, io::Error> {
+    pub fn decompress(buf: &[u8]) -> Result<MemFilter, io::Error> {
         let mut gz = GzDecoder::new(Vec::new());
         gz.write_all(&buf)?;
-        gz.finish().map(|filter| MemFilter(filter))
+        gz.finish().map(MemFilter)
     }
 }
 
@@ -1309,7 +1308,7 @@ impl Encodable for MemFilter {
 impl Decodable for MemFilter {
     #[inline]
     fn consensus_decode<D: io::Read>(mut d: D) -> Result<MemFilter, consensus_encode::Error> {
-        Decodable::consensus_decode(&mut d).map(|f| MemFilter(f))
+        Decodable::consensus_decode(&mut d).map(MemFilter)
     }
 }
 
@@ -1332,7 +1331,7 @@ impl Encodable for TxPrefix {
 impl Decodable for TxPrefix {
     #[inline]
     fn consensus_decode<D: io::Read>(mut d: D) -> Result<TxPrefix, consensus_encode::Error> {
-        Decodable::consensus_decode(&mut d).map(|p| TxPrefix(p))
+        Decodable::consensus_decode(&mut d).map(TxPrefix)
     }
 }
 
@@ -1385,7 +1384,7 @@ impl MempoolChunkResp {
         e.finish()
     }
 
-    pub fn decompress(buf: &Vec<u8>) -> Result<Vec<u8>, io::Error> {
+    pub fn decompress(buf: &[u8]) -> Result<Vec<u8>, io::Error> {
         let mut gz = GzDecoder::new(Vec::new());
         gz.write_all(&buf)?;
         gz.finish()
@@ -1395,7 +1394,8 @@ impl MempoolChunkResp {
 impl Display for MempoolChunkResp {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Mempool chunk: {}:{}:", self.prefix, self.txs.len())?;
-        fmt_vec(&self.txs.iter().map(|tx| tx.to_hex()).collect(), f)
+        let v : Vec<String> = self.txs.iter().map(|tx| tx.to_hex()).collect();
+        fmt_vec(&v, f)
     }
 }
 
@@ -1417,7 +1417,7 @@ impl Decodable for MempoolChunkResp {
         let amount = VarInt::consensus_decode(&mut d)?.0 as u32;
         let mut buf = vec![];
         d.read_to_end(&mut buf)?;
-        let uncompressed = FiltersResp::decompress(&mut buf)?;
+        let uncompressed = FiltersResp::decompress(&buf)?;
 
         let mut decoder = Cursor::new(uncompressed);
         let mut txs = vec![];
