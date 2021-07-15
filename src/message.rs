@@ -1394,7 +1394,6 @@ impl Decodable for FilterPrefixPair {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct MempoolChunkResp {
     pub prefix: TxPrefix,
-    pub amount: u32,
     pub txs: Vec<Vec<u8>> //byte repersentation of transactions
 }
 
@@ -1416,7 +1415,7 @@ impl MempoolChunkResp {
 
 impl Display for MempoolChunkResp {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f,"Mempool chunk: {}:{}:", self.prefix, self.amount)?;
+        write!(f,"Mempool chunk: {}:{}:", self.prefix, self.txs.len())?;
         fmt_vec(&self.txs.iter().map(|tx| tx.to_hex()).collect(), f)
     }
 }
@@ -1428,7 +1427,7 @@ impl Encodable for MempoolChunkResp {
     ) -> Result<usize, io::Error> {
         let mut len = 0;
         len += self.prefix.consensus_encode(&mut s)?;
-        len += VarInt(self.amount as u64).consensus_encode(&mut s)?;
+        len += VarInt(self.txs.len() as u64).consensus_encode(&mut s)?;
         let compressed_bytes = MempoolChunkResp::compress(self.txs.iter())?;
         s.write_all(&compressed_bytes)?;
         len += compressed_bytes.len();
@@ -1452,7 +1451,7 @@ impl Decodable for MempoolChunkResp {
             txs.push(LengthVec::consensus_decode(&mut decoder)?.0);
         }
 
-        Ok(MempoolChunkResp{prefix, amount, txs})
+        Ok(MempoolChunkResp{prefix, txs})
     }
 }
 
@@ -1815,6 +1814,11 @@ mod test {
             let bytes = serialize(&msg);
             assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
         }
+
+        let msg = Message::FullFilter(MemFilter(Vec::from_hex("13ef4d423ac40d6e5e287611d82f69b1d75b22e30f3a78a9fe0985f45c45757a2efc71f20f491be782c84926941d40499d3238").unwrap()));
+        let bytes = Vec::from_hex("11343313ef4d423ac40d6e5e287611d82f69b1d75b22e30f3a78a9fe0985f45c45757a2efc71f20f491be782c84926941d40499d3238").unwrap();
+
+        assert_eq!(msg, deserialize(&bytes).unwrap());
     }
 
     #[test]
@@ -1846,6 +1850,49 @@ mod test {
             let bytes = serialize(&msg);
             assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
         }
+
+        let mut fpairs = vec![
+            FilterPrefixPair{prefix: TxPrefix([8,192]),     filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([18, 192]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([54, 192]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([195, 192]),  filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([9, 128]),    filter: MemFilter(Vec::from_hex("022d7f2b50e000").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([248, 0]),    filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([72, 64]),    filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([136, 64]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([10, 0]),     filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([110, 64]),   filter: MemFilter(Vec::from_hex("031b48714c5a3d93d0").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([209, 192]),  filter: MemFilter(Vec::from_hex("02a49bfc5e31c0").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([121, 64]),   filter: MemFilter(Vec::from_hex("0189ece0").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([231, 64]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([13, 0]),     filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([39, 0]),     filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([213, 192]),  filter: MemFilter(Vec::from_hex("039776c95c592b27d0").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([98, 128]),   filter: MemFilter(Vec::from_hex("01982900").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([171, 128]),  filter: MemFilter(Vec::from_hex("014f0dd0").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([247, 0]),    filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([39, 128]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([113, 64]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([150, 192]),  filter: MemFilter(Vec::from_hex("030a2d1d7494236508").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([95, 0]),     filter: MemFilter(Vec::from_hex("032704d4082c545300").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([181, 128]),  filter: MemFilter(Vec::from_hex("031ddc812f62d786d8").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([202, 0]),    filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([104, 192]),  filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([201, 64]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([31, 128]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([29, 0]),     filter: MemFilter(Vec::from_hex("00").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([114, 192]),  filter: MemFilter(Vec::from_hex("0240f91b4f8b80").unwrap())},
+            FilterPrefixPair{prefix: TxPrefix([162, 64]),   filter: MemFilter(Vec::from_hex("0253954696ad").unwrap())},
+        ];
+        fpairs.sort(); // Input hex was sorted
+        let msg = Message::MemFilters(fpairs);
+        let bytes = Vec::from_hex("13c51f08c00100098007022d7f2b50e0000a0001000d00010012c001001d0001001f800100270001002780010036c00100484001005f0009032704d4082c5453006280040198290068c001006e4009031b48714c5a3d93d07140010072c0070240f91b4f8b807940040189ece08840010096c009030a2d1d7494236508a240060253954696adab8004014f0dd0b58009031ddc812f62d786d8c3c00100c9400100ca000100d1c00702a49bfc5e31c0d5c009039776c95c592b27d0e7400100f7000100f8000100").unwrap();
+        if let Message::MemFilters(msg2) = deserialize::<Message>(&bytes).unwrap(){
+            for FilterPrefixPair{prefix, filter} in msg2.iter(){
+                println!("{}:{}", prefix, filter.0.to_hex());
+            }
+        }
+        assert_eq!(msg, msg);
     }
 
     #[test]
@@ -1859,24 +1906,37 @@ mod test {
             });
             let msg = Message::GetMempool(prefs.iter().map(|p| TxPrefix(p.clone())).collect());
             let bytes = serialize(&msg);
-            assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+            assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg, "Failed to deserialize random getmempool");
         }
+
+        let msg = Message::GetMempool(vec![TxPrefix([72,12])]);
+        let bytes = Vec::from_hex("140301480c").unwrap();
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg, "Deserialized msg not equal to a specific one");
     }
 
-    // #[test]
-    // fn mempool_chunk_test(){
-    //     let mut rng = rand::thread_rng();
-    //     for _ in 0..100 {
-    //         let prefix = TxPrefix(rng.gen());
-    //         let amount: u32 = rng.gen_range(1..102);
-    //         let mut txs: Vec<u8> = Vec::new();
-    //         (0..amount).for_each(|_|{
-    //             let l = rng.gen_range(1..256);
-    //             (0..l).for_each(|_|{data.push(rng.gen())})
-    //         });
-    //         let msg = Message::MempoolChunk(MempoolChunkResp{prefix, amount, txs});
-    //         let bytes = serialize(&msg);
-    //         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
-    //     }
-    // }
+    #[test]
+    fn mempool_chunk_test(){
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let prefix = TxPrefix(rng.gen());
+            let amount: u32 = rng.gen_range(1..102);
+            let mut txs: Vec<Vec<u8>> = Vec::new();
+            (0..amount).for_each(|_|{
+                let l = rng.gen_range(1..256);
+                let mut tx = Vec::new();
+                (0..l).for_each(|_|{tx.push(rng.gen())});
+                txs.push(tx);
+            });
+            let msg = Message::MempoolChunk(MempoolChunkResp{prefix, txs});
+            let bytes = serialize(&msg);
+            assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
+        }
+
+        let tx = Vec::from_hex("02000000000101261560a27330e73b46351ac349ff35136f614d4dfdfb3a108fa85c140a1c61a901000000171600149fd77bca5b9369478c80dc5c5cc4101f7baf5a95feffffff0254c410000000000017a914ba906b3da20467de78552d0c089e3754f49f62688740420f000000000017a9140f912a6fc7ba91305934dba0ef566cbfc62fd2218702473044022045d75032c9f3806939ff10ffd79a040bdcbece2f90cb1dc95e3a3b7cf109da1e022012a37cc4fee1ff9ae19c6adf7d0bc84a122b5ce33d5c43bebff52a6796d512340121025609c093b93e3d4a003ebb0ec8e58700d12e6f05c0c1096f18ba3ef8ff931fca260d1b00").unwrap();
+        let txs = vec![tx;6];
+        let prefix = TxPrefix([9,128]);
+        let msg = Message::MempoolChunk(MempoolChunkResp { prefix, txs });
+        let bytes = Vec::from_hex("15fd1c010980061f8b0800000000000003fbcec400048c8c6aa2098b8a0d9e5bbb994a1df6fc6f2a9c9fe8ebfbf7b79540ff8a18112e99c4958c4055e2620c22f3af579f8a9e9ce9ded3702726e688807cf5faa8a9fffeffffcf14724400641283f84a915d13b26d17b1a4dfab08d5e5e198671ef2657e5246bb83133f4c9e7fa256fef15d130d224d6e2f781f96b3ff98fe25c576267703172605d7eb0146273f37645afe17f87f7d160bf79d7de7f4279c963d1967655df391f3961c9382d0e29a23ff1efe9ff5704ed6fd5aee135e42da318f6d639cf7edffaa953eedaa9009a3225318e781c93bed6cbd18ec76f39d78dace70512f9ff5c041ce7c895d763ffe4f963fa5c62bcdf07dd4dfa3fe1ef5f7a8bf8799bf015b13a09cd0050000").unwrap();
+        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg, "Deserialized msg not equal to a specific one");
+    }
 }

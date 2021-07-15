@@ -1,14 +1,13 @@
 extern crate ergvein_protocol;
 extern crate rand;
 
+use std::io::Write;
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, process};
-use std::io::Write;
 
-use rand::{thread_rng, Rng};
 use ergvein_protocol::message::*;
-use consensus_encode::util::hex::ToHex;
+use rand::{thread_rng, Rng};
 
 fn main() {
     // This example establishes a connection to a Bitcoin node, sends the intial
