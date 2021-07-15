@@ -1,16 +1,19 @@
-use fix::aliases::si::Centi;
-use flate2::Compression;
-use flate2::write::{GzDecoder, GzEncoder};
-use std::{net, io};
-use std::fmt::{Display, Formatter};
-use std::io::{Write, Cursor};
 use crate::util::*;
 use consensus_encode::util::hex::ToHex;
-pub use consensus_encode::{Error, Decodable, Encodable, deserialize, deserialize_partial, serialize, serialize_hex, MAX_VEC_SIZE, VarInt};
 pub use consensus_encode::util::stream_reader::StreamReader;
+pub use consensus_encode::{
+    deserialize, deserialize_partial, serialize, serialize_hex, Decodable, Encodable, Error,
+    VarInt, MAX_VEC_SIZE,
+};
+use fix::aliases::si::Centi;
+use flate2::write::{GzDecoder, GzEncoder};
+use flate2::Compression;
+use std::fmt::{Display, Formatter};
+use std::io::{Cursor, Write};
+use std::{io, net};
 
-macro_rules! impl_pure_encodable{
-    ($ty:ident, $meth_dec:ident, $meth_enc:ident) => (
+macro_rules! impl_pure_encodable {
+    ($ty:ident, $meth_dec:ident, $meth_enc:ident) => {
         impl Decodable for $ty {
             #[inline]
             fn consensus_decode<D: io::Read>(d: D) -> Result<Self, Error> {
@@ -19,14 +22,11 @@ macro_rules! impl_pure_encodable{
         }
         impl Encodable for $ty {
             #[inline]
-            fn consensus_encode<S: io::Write>(
-                &self,
-                s: S,
-            ) -> Result<usize, io::Error> {
+            fn consensus_encode<S: io::Write>(&self, s: S) -> Result<usize, io::Error> {
                 Encodable::consensus_encode(&self.$meth_enc(), s)
             }
         }
-    )
+    };
 }
 
 /// Currencies that protocol aware of, there can be currencies that will never be implemented but
@@ -129,7 +129,6 @@ impl Currency {
 }
 impl_pure_encodable!(Currency, unpack, pack);
 
-
 #[derive(Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Debug, Hash)]
 pub enum Fiat {
     Usd,
@@ -191,16 +190,25 @@ impl Display for Address {
             Address::Ipv4(addr) => write!(f, "{}", addr),
             Address::Ipv6(addr) => write!(f, "{}", addr),
             Address::OnionV3(addr, p) => {
-                let str_addr = String::from_utf8(addr.to_vec()).unwrap_or_else(|_| format!("{:?}", addr));
+                let str_addr =
+                    String::from_utf8(addr.to_vec()).unwrap_or_else(|_| format!("{:?}", addr));
                 write!(f, "{}:{}", str_addr, p)
-            },
+            }
         }
     }
 }
 
 fn ipv6_to_be(addr: [u16; 8]) -> [u16; 8] {
-    [addr[0].to_be(), addr[1].to_be(), addr[2].to_be(), addr[3].to_be(),
-     addr[4].to_be(), addr[5].to_be(), addr[6].to_be(), addr[7].to_be()]
+    [
+        addr[0].to_be(),
+        addr[1].to_be(),
+        addr[2].to_be(),
+        addr[3].to_be(),
+        addr[4].to_be(),
+        addr[5].to_be(),
+        addr[6].to_be(),
+        addr[7].to_be(),
+    ]
 }
 
 impl Decodable for Address {
@@ -234,10 +242,7 @@ impl Decodable for Address {
 }
 impl Encodable for Address {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         match self {
             Address::Ipv4(sock) => {
                 let t: u8 = 0;
@@ -245,14 +250,14 @@ impl Encodable for Address {
                     + Encodable::consensus_encode(&sock.ip().octets(), &mut s)?
                     + Encodable::consensus_encode(&sock.port().to_be(), &mut s)?;
                 Ok(l)
-            },
+            }
             Address::Ipv6(sock) => {
                 let t: u8 = 1;
                 let l = Encodable::consensus_encode(&t, &mut s)?
                     + Encodable::consensus_encode(&sock.ip().octets(), &mut s)?
                     + Encodable::consensus_encode(&sock.port().to_be(), &mut s)?;
                 Ok(l)
-            },
+            }
             Address::OnionV3(b, p) => {
                 let t: u8 = 2;
                 let l = Encodable::consensus_encode(&t, &mut s)?
@@ -300,22 +305,26 @@ impl Version {
 
     /// Pack version as 32 bit word with 10 bits per component and 2 reserved bits.
     pub fn pack(&self) -> u32 {
-        (((self.major & 0b000001111111111) as u32) <<  2) +
-        (((self.minor & 0b000001111111111) as u32) << 12) +
-        (((self.patch & 0b000001111111111) as u32) << 22)
+        (((self.major & 0b000001111111111) as u32) << 2)
+            + (((self.minor & 0b000001111111111) as u32) << 12)
+            + (((self.patch & 0b000001111111111) as u32) << 22)
     }
 
     /// Unpack version from 32 bit word with 10 bits per component and 2 reserved bits.
     pub fn unpack(w: u32) -> Self {
         Version {
-            major: ((w >>  2) & 0b000001111111111) as u16,
+            major: ((w >> 2) & 0b000001111111111) as u16,
             minor: ((w >> 12) & 0b000001111111111) as u16,
             patch: ((w >> 22) & 0b000001111111111) as u16,
         }
     }
 
-    fn pack_be(&self) -> u32 { self.pack().to_be() }
-    fn unpack_be(w: u32) -> Self { Version::unpack(w.to_be()) }
+    fn pack_be(&self) -> u32 {
+        self.pack().to_be()
+    }
+    fn unpack_be(w: u32) -> Self {
+        Version::unpack(w.to_be())
+    }
 }
 impl_pure_encodable!(Version, unpack_be, pack_be);
 
@@ -332,8 +341,8 @@ pub enum Message {
     Fee(Vec<FeeResp>),
     PeerIntroduce(Vec<Address>),
     Reject(RejectMessage),
-    Ping([u8;8]),
-    Pong([u8;8]),
+    Ping([u8; 8]),
+    Pong([u8; 8]),
     GetRates(Vec<RateReq>),
     Rates(Vec<RateResp>),
     FullFilterInv,
@@ -342,12 +351,12 @@ pub enum Message {
     GetMemFilters,
     MemFilters(Vec<FilterPrefixPair>),
     GetMempool(Vec<TxPrefix>),
-    MempoolChunk(MempoolChunkResp)
+    MempoolChunk(MempoolChunkResp),
 }
 
 fn fmt_vec<T: Display>(v: &Vec<T>, f: &mut Formatter) -> std::fmt::Result {
     for (i, b) in v.iter().enumerate() {
-        if i == v.len()-1 {
+        if i == v.len() - 1 {
             write!(f, "{}", b)?;
         } else {
             write!(f, "{}, ", b)?;
@@ -397,12 +406,12 @@ impl Display for Message {
             Message::FullFilter(msg) => {
                 write!(f, "fullfilter: ")?;
                 msg.fmt(f)
-            },
+            }
             Message::GetMemFilters => write!(f, "getmemfilters"),
             Message::MemFilters(msg) => {
                 write!(f, "memfilters: ")?;
                 fmt_vec(msg, f)
-            },
+            }
             Message::GetMempool(msg) => {
                 write!(f, "getmempool: ")?;
                 fmt_vec(msg, f)
@@ -416,7 +425,7 @@ impl Display for Message {
 }
 
 /// Maximum size of message in bytes
-pub const MAX_MESSAGE_SIZE: usize = 10*1024*1024;
+pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 
 impl Message {
     pub fn id(&self) -> u32 {
@@ -477,13 +486,9 @@ impl Message {
 
 impl Encodable for Message {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
-
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         fn write_payload<S, T>(mut s: &mut S, v: &T) -> Result<usize, io::Error>
-            where
+        where
             S: io::Write,
             T: Encodable + ?Sized,
         {
@@ -526,12 +531,9 @@ impl Encodable for Message {
 
 impl Decodable for Message {
     #[inline]
-    fn consensus_decode<D: ::std::io::Read>(
-        mut d: D,
-    ) -> Result<Message, consensus_encode::Error> {
-
+    fn consensus_decode<D: ::std::io::Read>(mut d: D) -> Result<Message, consensus_encode::Error> {
         fn read_payload<F, D>(mut d: &mut D, mut f: F) -> Result<Message, consensus_encode::Error>
-            where
+        where
             F: FnMut(&mut [u8]) -> Result<Message, consensus_encode::Error>,
             D: io::Read,
         {
@@ -571,23 +573,27 @@ impl Decodable for Message {
                 Ok(Message::Fee(deserialize::<LengthVec<FeeResp>>(&buf)?.0))
             }),
             9 => read_payload(&mut d, |buf| {
-                Ok(Message::PeerIntroduce(deserialize::<LengthVec<Address>>(&buf)?.0))
+                Ok(Message::PeerIntroduce(
+                    deserialize::<LengthVec<Address>>(&buf)?.0,
+                ))
             }),
             10 => read_payload(&mut d, |buf| {
                 Ok(Message::Reject(deserialize::<RejectMessage>(&buf)?))
             }),
             11 => read_payload(&mut d, |buf| {
                 let mut nonce: [u8; 8] = Default::default();
-                nonce.copy_from_slice(&buf[0 .. 8]);
+                nonce.copy_from_slice(&buf[0..8]);
                 Ok(Message::Ping(nonce))
             }),
             12 => read_payload(&mut d, |buf| {
                 let mut nonce: [u8; 8] = Default::default();
-                nonce.copy_from_slice(&buf[0 .. 8]);
+                nonce.copy_from_slice(&buf[0..8]);
                 Ok(Message::Pong(nonce))
             }),
             13 => read_payload(&mut d, |buf| {
-                Ok(Message::GetRates(deserialize::<LengthVec<RateReq>>(&buf)?.0))
+                Ok(Message::GetRates(
+                    deserialize::<LengthVec<RateReq>>(&buf)?.0,
+                ))
             }),
             14 => read_payload(&mut d, |buf| {
                 Ok(Message::Rates(deserialize::<LengthVec<RateResp>>(&buf)?.0))
@@ -599,17 +605,22 @@ impl Decodable for Message {
             }),
             18 => Ok(Message::GetMemFilters),
             19 => read_payload(&mut d, |buf| {
-                Ok(Message::MemFilters(deserialize::<LengthVec<FilterPrefixPair>>(&buf)?.0))
+                Ok(Message::MemFilters(
+                    deserialize::<LengthVec<FilterPrefixPair>>(&buf)?.0,
+                ))
             }),
             20 => read_payload(&mut d, |buf| {
-                Ok(Message::GetMempool(deserialize::<LengthVec<TxPrefix>>(&buf)?.0))
+                Ok(Message::GetMempool(
+                    deserialize::<LengthVec<TxPrefix>>(&buf)?.0,
+                ))
             }),
             21 => read_payload(&mut d, |buf| {
-                Ok(Message::MempoolChunk(deserialize::<MempoolChunkResp>(&buf)?))
+                Ok(Message::MempoolChunk(deserialize::<MempoolChunkResp>(
+                    &buf,
+                )?))
             }),
             _ => Err(Error::ParseFailed("Unknown message type")),
         }
-
     }
 }
 
@@ -623,16 +634,17 @@ pub struct ScanBlock {
 
 impl Display for ScanBlock {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} (v{}) {}/{}", self.currency, self.version, self.scan_height, self.height)
+        write!(
+            f,
+            "{} (v{}) {}/{}",
+            self.currency, self.version, self.scan_height, self.height
+        )
     }
 }
 
 impl Encodable for ScanBlock {
     #[inline]
-    fn consensus_encode<S: ::std::io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, ::std::io::Error> {
+    fn consensus_encode<S: ::std::io::Write>(&self, mut s: S) -> Result<usize, ::std::io::Error> {
         let mut len = 0;
         len += self.currency.consensus_encode(&mut s)?;
         len += self.version.consensus_encode(&mut s)?;
@@ -656,7 +668,6 @@ impl Decodable for ScanBlock {
     }
 }
 
-
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct VersionMessage {
     pub version: Version,
@@ -667,18 +678,20 @@ pub struct VersionMessage {
 
 impl Display for VersionMessage {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(f, "Version {} at {} with nonce {} and currencies:", self.version, self.time, self.nonce.to_hex())?;
+        write!(
+            f,
+            "Version {} at {} with nonce {} and currencies:",
+            self.version,
+            self.time,
+            self.nonce.to_hex()
+        )?;
         fmt_vec(&self.scan_blocks, f)
     }
 }
 
-
 impl Encodable for VersionMessage {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         let mut len = 0;
         len += self.version.consensus_encode(&mut s)?;
         len += self.time.consensus_encode(&mut s)?;
@@ -690,9 +703,7 @@ impl Encodable for VersionMessage {
 
 impl Decodable for VersionMessage {
     #[inline]
-    fn consensus_decode<D: io::Read>(
-        mut d: D,
-    ) -> Result<VersionMessage, consensus_encode::Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<VersionMessage, consensus_encode::Error> {
         Ok(VersionMessage {
             version: Decodable::consensus_decode(&mut d)?,
             time: Decodable::consensus_decode(&mut d)?,
@@ -711,16 +722,17 @@ pub struct FiltersReq {
 
 impl Display for FiltersReq {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "req {} {} filters from {}", self.amount, self.currency, self.start)
+        write!(
+            f,
+            "req {} {} filters from {}",
+            self.amount, self.currency, self.start
+        )
     }
 }
 
 impl Encodable for FiltersReq {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         let mut len = 0;
         len += self.currency.consensus_encode(&mut s)?;
         len += VarInt(self.start).consensus_encode(&mut s)?;
@@ -731,9 +743,7 @@ impl Encodable for FiltersReq {
 
 impl Decodable for FiltersReq {
     #[inline]
-    fn consensus_decode<D: io::Read>(
-        mut d: D,
-    ) -> Result<FiltersReq, consensus_encode::Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<FiltersReq, consensus_encode::Error> {
         Ok(FiltersReq {
             currency: Decodable::consensus_decode(&mut d)?,
             start: VarInt::consensus_decode(&mut d)?.0,
@@ -750,16 +760,18 @@ pub struct Filter {
 
 impl Display for Filter {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Block {}, filter {}", self.block_id.to_hex(), self.filter.to_hex())
+        write!(
+            f,
+            "Block {}, filter {}",
+            self.block_id.to_hex(),
+            self.filter.to_hex()
+        )
     }
 }
 
 impl Encodable for Filter {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         let mut len = 0;
         len += s.write(&self.block_id)?;
         len += self.filter.consensus_encode(&mut s)?;
@@ -769,9 +781,7 @@ impl Encodable for Filter {
 
 impl Decodable for Filter {
     #[inline]
-    fn consensus_decode<D: io::Read>(
-        mut d: D,
-    ) -> Result<Filter, consensus_encode::Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<Filter, consensus_encode::Error> {
         let bid: [u8; 32] = Decodable::consensus_decode(&mut d)?;
         Ok(Filter {
             block_id: bid.to_vec(),
@@ -780,15 +790,14 @@ impl Decodable for Filter {
     }
 }
 
-
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct FiltersResp {
     pub currency: Currency,
-    pub filters: Vec<Filter>
+    pub filters: Vec<Filter>,
 }
 
 impl FiltersResp {
-    pub fn compress<'a, I: Iterator<Item=&'a Filter>>(filters: I) -> Result<Vec<u8>, io::Error> {
+    pub fn compress<'a, I: Iterator<Item = &'a Filter>>(filters: I) -> Result<Vec<u8>, io::Error> {
         let mut e = GzEncoder::new(Vec::new(), Compression::default());
         for f in filters {
             e.write_all(&serialize(&f))?;
@@ -812,10 +821,7 @@ impl Display for FiltersResp {
 
 impl Encodable for FiltersResp {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         let mut len = 0;
         len += self.currency.consensus_encode(&mut s)?;
         len += VarInt(self.filters.len() as u64).consensus_encode(&mut s)?;
@@ -830,9 +836,7 @@ impl Encodable for FiltersResp {
 
 impl Decodable for FiltersResp {
     #[inline]
-    fn consensus_decode<D: io::Read>(
-        mut d: D,
-    ) -> Result<FiltersResp, consensus_encode::Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<FiltersResp, consensus_encode::Error> {
         let cur = Decodable::consensus_decode(&mut d)?;
         let amount = VarInt::consensus_decode(&mut d)?.0;
 
@@ -842,7 +846,7 @@ impl Decodable for FiltersResp {
 
         let mut decoder = Cursor::new(uncompressed);
         let mut fs = vec![];
-        for _ in 0 .. amount {
+        for _ in 0..amount {
             fs.push(Filter::consensus_decode(&mut decoder)?);
         }
 
@@ -863,16 +867,20 @@ pub struct FilterEvent {
 
 impl Display for FilterEvent {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "New {} filter at height {} and id {}, body: {}", self.currency, self.height, self.block_id.to_hex(), self.filter.to_hex())
+        write!(
+            f,
+            "New {} filter at height {} and id {}, body: {}",
+            self.currency,
+            self.height,
+            self.block_id.to_hex(),
+            self.filter.to_hex()
+        )
     }
 }
 
 impl Encodable for FilterEvent {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         let mut len = 0;
         len += self.currency.consensus_encode(&mut s)?;
         len += VarInt(self.height).consensus_encode(&mut s)?;
@@ -885,14 +893,15 @@ impl Encodable for FilterEvent {
 
 impl Decodable for FilterEvent {
     #[inline]
-    fn consensus_decode<D: io::Read>(
-        mut d: D,
-    ) -> Result<FilterEvent, consensus_encode::Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<FilterEvent, consensus_encode::Error> {
         let mut buf = [0; 32];
         Ok(FilterEvent {
             currency: Decodable::consensus_decode(&mut d)?,
             height: VarInt::consensus_decode(&mut d)?.0,
-            block_id: { d.read_exact(&mut buf)?; buf.to_vec() },
+            block_id: {
+                d.read_exact(&mut buf)?;
+                buf.to_vec()
+            },
             filter: Decodable::consensus_decode(&mut d)?,
         })
     }
@@ -910,18 +919,27 @@ pub struct FeeBtc {
 
 impl Display for FeeBtc {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Fast(conservative {} sat/byte, econom {} sat/byte)", self.fast_conserv, self.fast_econom)?;
-        writeln!(f, "Moderate(conservative {} sat/byte, econom {} sat/byte)", self.moderate_conserv, self.moderate_econom)?;
-        writeln!(f, "Cheap(conservative {} sat/byte, econom {} sat/byte)", self.cheap_conserv, self.cheap_econom)
+        writeln!(
+            f,
+            "Fast(conservative {} sat/byte, econom {} sat/byte)",
+            self.fast_conserv, self.fast_econom
+        )?;
+        writeln!(
+            f,
+            "Moderate(conservative {} sat/byte, econom {} sat/byte)",
+            self.moderate_conserv, self.moderate_econom
+        )?;
+        writeln!(
+            f,
+            "Cheap(conservative {} sat/byte, econom {} sat/byte)",
+            self.cheap_conserv, self.cheap_econom
+        )
     }
 }
 
 impl Encodable for FeeBtc {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         let mut len = 0;
         len += VarInt(self.fast_conserv).consensus_encode(&mut s)?;
         len += VarInt(self.fast_econom).consensus_encode(&mut s)?;
@@ -935,9 +953,7 @@ impl Encodable for FeeBtc {
 
 impl Decodable for FeeBtc {
     #[inline]
-    fn consensus_decode<D: io::Read>(
-        mut d: D,
-    ) -> Result<FeeBtc, consensus_encode::Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<FeeBtc, consensus_encode::Error> {
         Ok(FeeBtc {
             fast_conserv: VarInt::consensus_decode(&mut d)?.0,
             fast_econom: VarInt::consensus_decode(&mut d)?.0,
@@ -966,10 +982,7 @@ impl Display for FeeOther {
 
 impl Encodable for FeeOther {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         let mut len = 0;
         len += VarInt(self.fast).consensus_encode(&mut s)?;
         len += VarInt(self.moderate).consensus_encode(&mut s)?;
@@ -980,9 +993,7 @@ impl Encodable for FeeOther {
 
 impl Decodable for FeeOther {
     #[inline]
-    fn consensus_decode<D: io::Read>(
-        mut d: D,
-    ) -> Result<FeeOther, consensus_encode::Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<FeeOther, consensus_encode::Error> {
         Ok(FeeOther {
             fast: VarInt::consensus_decode(&mut d)?.0,
             moderate: VarInt::consensus_decode(&mut d)?.0,
@@ -1014,17 +1025,18 @@ impl Display for FeeResp {
 
 impl Encodable for FeeResp {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         let mut len = 0;
         match self {
             FeeResp::Btc((currency, fee)) => {
-                assert_eq!(*currency == Currency::Btc || *currency == Currency::TBtc, true, "FeeBtc currency must be Btc or TBtc!");
+                assert_eq!(
+                    *currency == Currency::Btc || *currency == Currency::TBtc,
+                    true,
+                    "FeeBtc currency must be Btc or TBtc!"
+                );
                 len += currency.consensus_encode(&mut s)?;
                 len += fee.consensus_encode(&mut s)?
-            },
+            }
             FeeResp::Other((currency, fee)) => {
                 len += currency.consensus_encode(&mut s)?;
                 len += fee.consensus_encode(&mut s)?
@@ -1036,12 +1048,12 @@ impl Encodable for FeeResp {
 
 impl Decodable for FeeResp {
     #[inline]
-    fn consensus_decode<D: io::Read>(
-        mut d: D,
-    ) -> Result<FeeResp, consensus_encode::Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<FeeResp, consensus_encode::Error> {
         let cur = Currency::consensus_decode(&mut d)?;
         match cur {
-            Currency::Btc | Currency::TBtc => Ok(FeeResp::Btc((cur, Decodable::consensus_decode(&mut d)?))),
+            Currency::Btc | Currency::TBtc => {
+                Ok(FeeResp::Btc((cur, Decodable::consensus_decode(&mut d)?)))
+            }
             _ => Ok(FeeResp::Other((cur, Decodable::consensus_decode(&mut d)?))),
         }
     }
@@ -1112,16 +1124,19 @@ pub struct RejectMessage {
 
 impl Display for RejectMessage {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "reject {} for {}, reason: {}", self.data, Message::name_from_id(self.id).unwrap_or("unknown"), self.message)
+        write!(
+            f,
+            "reject {} for {}, reason: {}",
+            self.data,
+            Message::name_from_id(self.id).unwrap_or("unknown"),
+            self.message
+        )
     }
 }
 
 impl Encodable for RejectMessage {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         let mut len = 0;
         len += VarInt(self.id as u64).consensus_encode(&mut s)?;
         len += self.data.consensus_encode(&mut s)?;
@@ -1132,9 +1147,7 @@ impl Encodable for RejectMessage {
 
 impl Decodable for RejectMessage {
     #[inline]
-    fn consensus_decode<D: io::Read>(
-        mut d: D,
-    ) -> Result<RejectMessage, consensus_encode::Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<RejectMessage, consensus_encode::Error> {
         Ok(RejectMessage {
             id: VarInt::consensus_decode(&mut d)?.0 as u32,
             data: Decodable::consensus_decode(&mut d)?,
@@ -1158,10 +1171,7 @@ impl Display for RateReq {
 
 impl Encodable for RateReq {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         let mut len = 0;
         len += self.currency.consensus_encode(&mut s)?;
         len += LengthVecRef(&self.fiats).consensus_encode(&mut s)?;
@@ -1171,9 +1181,7 @@ impl Encodable for RateReq {
 
 impl Decodable for RateReq {
     #[inline]
-    fn consensus_decode<D: io::Read>(
-        mut d: D,
-    ) -> Result<RateReq, consensus_encode::Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<RateReq, consensus_encode::Error> {
         Ok(RateReq {
             currency: Decodable::consensus_decode(&mut d)?,
             fiats: LengthVec::consensus_decode(&mut d)?.0,
@@ -1188,10 +1196,7 @@ struct RateWord(Rate);
 
 impl Encodable for RateWord {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         let w: u64 = self.0.bits;
         let len = w.consensus_encode(&mut s)?;
         Ok(len)
@@ -1200,9 +1205,7 @@ impl Encodable for RateWord {
 
 impl Decodable for RateWord {
     #[inline]
-    fn consensus_decode<D: io::Read>(
-        mut d: D,
-    ) -> Result<RateWord, consensus_encode::Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<RateWord, consensus_encode::Error> {
         let w: u64 = Decodable::consensus_decode(&mut d)?;
         Ok(RateWord(Rate::new(w)))
     }
@@ -1222,10 +1225,7 @@ impl Display for FiatRate {
 
 impl Encodable for FiatRate {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         let mut len = 0;
         len += self.fiat.consensus_encode(&mut s)?;
         len += RateWord(self.rate).consensus_encode(&mut s)?;
@@ -1235,9 +1235,7 @@ impl Encodable for FiatRate {
 
 impl Decodable for FiatRate {
     #[inline]
-    fn consensus_decode<D: io::Read>(
-        mut d: D,
-    ) -> Result<FiatRate, consensus_encode::Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<FiatRate, consensus_encode::Error> {
         Ok(FiatRate {
             fiat: Decodable::consensus_decode(&mut d)?,
             rate: RateWord::consensus_decode(&mut d)?.0,
@@ -1245,11 +1243,10 @@ impl Decodable for FiatRate {
     }
 }
 
-
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct RateResp {
     pub currency: Currency,
-    pub rates: Vec<FiatRate>
+    pub rates: Vec<FiatRate>,
 }
 
 impl Display for RateResp {
@@ -1261,10 +1258,7 @@ impl Display for RateResp {
 
 impl Encodable for RateResp {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         let mut len = 0;
         len += self.currency.consensus_encode(&mut s)?;
         len += LengthVecRef(&self.rates).consensus_encode(&mut s)?;
@@ -1274,9 +1268,7 @@ impl Encodable for RateResp {
 
 impl Decodable for RateResp {
     #[inline]
-    fn consensus_decode<D: io::Read>(
-        mut d: D,
-    ) -> Result<RateResp, consensus_encode::Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<RateResp, consensus_encode::Error> {
         Ok(RateResp {
             currency: Decodable::consensus_decode(&mut d)?,
             rates: LengthVec::consensus_decode(&mut d)?.0,
@@ -1287,7 +1279,7 @@ impl Decodable for RateResp {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct MemFilter(pub Vec<u8>);
 
-impl MemFilter{
+impl MemFilter {
     pub fn compress(&self) -> Result<Vec<u8>, io::Error> {
         let mut e = GzEncoder::new(Vec::new(), Compression::default());
         e.write_all(&self.0)?;
@@ -1302,54 +1294,44 @@ impl MemFilter{
 }
 
 impl Display for MemFilter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Mempool filter {}", self.0.to_hex())
     }
 }
 
 impl Encodable for MemFilter {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S,
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         self.0.consensus_encode(&mut s)
     }
 }
 
 impl Decodable for MemFilter {
     #[inline]
-    fn consensus_decode<D: io::Read>(
-        mut d: D,
-    ) -> Result<MemFilter, consensus_encode::Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<MemFilter, consensus_encode::Error> {
         Decodable::consensus_decode(&mut d).map(|f| MemFilter(f))
     }
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-pub struct TxPrefix(pub [u8;2]);
+pub struct TxPrefix(pub [u8; 2]);
 
 impl Display for TxPrefix {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Prefix: {}", self.0.to_hex())
     }
 }
 
-impl Encodable for TxPrefix{
+impl Encodable for TxPrefix {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         self.0.consensus_encode(&mut s)
     }
 }
 
 impl Decodable for TxPrefix {
     #[inline]
-    fn consensus_decode<D: io::Read>(
-        mut d: D,
-    ) -> Result<TxPrefix, consensus_encode::Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<TxPrefix, consensus_encode::Error> {
         Decodable::consensus_decode(&mut d).map(|p| TxPrefix(p))
     }
 }
@@ -1357,22 +1339,19 @@ impl Decodable for TxPrefix {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct FilterPrefixPair {
     pub prefix: TxPrefix,
-    pub filter: MemFilter
+    pub filter: MemFilter,
 }
 
-impl Display for FilterPrefixPair{
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result{
+impl Display for FilterPrefixPair {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Prefix: {:?}; ", self.prefix)?;
         self.filter.fmt(f)
     }
 }
 
-impl Encodable for FilterPrefixPair{
+impl Encodable for FilterPrefixPair {
     #[inline]
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         let mut len = 0;
         len += self.prefix.consensus_encode(&mut s)?;
         len += self.filter.consensus_encode(&mut s)?;
@@ -1387,18 +1366,18 @@ impl Decodable for FilterPrefixPair {
     ) -> Result<FilterPrefixPair, consensus_encode::Error> {
         let prefix = Decodable::consensus_decode(&mut d)?;
         let filter = Decodable::consensus_decode(&mut d)?;
-        Ok(FilterPrefixPair{prefix, filter})
+        Ok(FilterPrefixPair { prefix, filter })
     }
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct MempoolChunkResp {
     pub prefix: TxPrefix,
-    pub txs: Vec<Vec<u8>> //byte repersentation of transactions
+    pub txs: Vec<Vec<u8>>, //byte repersentation of transactions
 }
 
 impl MempoolChunkResp {
-    pub fn compress<'a, I: Iterator<Item=&'a Vec<u8>>>(filters: I) -> Result<Vec<u8>, io::Error> {
+    pub fn compress<'a, I: Iterator<Item = &'a Vec<u8>>>(filters: I) -> Result<Vec<u8>, io::Error> {
         let mut e = GzEncoder::new(Vec::new(), Compression::default());
         for f in filters {
             e.write_all(&serialize(&f))?;
@@ -1415,16 +1394,13 @@ impl MempoolChunkResp {
 
 impl Display for MempoolChunkResp {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f,"Mempool chunk: {}:{}:", self.prefix, self.txs.len())?;
+        write!(f, "Mempool chunk: {}:{}:", self.prefix, self.txs.len())?;
         fmt_vec(&self.txs.iter().map(|tx| tx.to_hex()).collect(), f)
     }
 }
 
 impl Encodable for MempoolChunkResp {
-    fn consensus_encode<S: io::Write>(
-        &self,
-        mut s: S
-    ) -> Result<usize, io::Error> {
+    fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
         let mut len = 0;
         len += self.prefix.consensus_encode(&mut s)?;
         len += VarInt(self.txs.len() as u64).consensus_encode(&mut s)?;
@@ -1436,9 +1412,7 @@ impl Encodable for MempoolChunkResp {
 }
 
 impl Decodable for MempoolChunkResp {
-    fn consensus_decode<D: io::Read>(
-        mut d: D
-    ) -> Result<Self, Error> {
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<Self, Error> {
         let prefix = Decodable::consensus_decode(&mut d)?;
         let amount = VarInt::consensus_decode(&mut d)?.0 as u32;
         let mut buf = vec![];
@@ -1447,11 +1421,11 @@ impl Decodable for MempoolChunkResp {
 
         let mut decoder = Cursor::new(uncompressed);
         let mut txs = vec![];
-        for _ in 0 .. amount {
+        for _ in 0..amount {
             txs.push(LengthVec::consensus_decode(&mut decoder)?.0);
         }
 
-        Ok(MempoolChunkResp{prefix, txs})
+        Ok(MempoolChunkResp { prefix, txs })
     }
 }
 
@@ -1463,26 +1437,40 @@ mod test {
 
     #[test]
     fn version_test_1() {
-        let ver = Version { major: 1, minor: 2, patch: 4 };
+        let ver = Version {
+            major: 1,
+            minor: 2,
+            patch: 4,
+        };
         assert_eq!(ver.pack(), 0b0000000100_0000000010_0000000001_00);
         assert_eq!(Version::unpack(0b0000000100_0000000010_0000000001_00), ver);
     }
 
     #[test]
     fn version_test_2() {
-        let ver = Version { major: 2, minor: 0, patch: 0 };
+        let ver = Version {
+            major: 2,
+            minor: 0,
+            patch: 0,
+        };
         assert_eq!(ver.pack(), 0b0000000000_0000000000_0000000010_00);
         assert_eq!(Version::unpack(0b0000000000_0000000000_0000000010_00), ver);
     }
 
     #[test]
     fn version_compat_self() {
-        assert!(Version::current().compatible(&Version::current()), "Version is compatible to self");
+        assert!(
+            Version::current().compatible(&Version::current()),
+            "Version is compatible to self"
+        );
     }
 
     #[test]
     fn address_test_v4() {
-        let addr = Address::Ipv4(net::SocketAddrV4::new(net::Ipv4Addr::new(127, 0, 0, 1), 4142));
+        let addr = Address::Ipv4(net::SocketAddrV4::new(
+            net::Ipv4Addr::new(127, 0, 0, 1),
+            4142,
+        ));
         let bytes = vec![0, 127, 0, 0, 1, 0x10, 0x2E];
         assert_eq!(serialize(&addr), bytes);
         assert_eq!(deserialize::<Address>(&bytes).unwrap(), addr);
@@ -1490,16 +1478,34 @@ mod test {
 
     #[test]
     fn address_test_v6() {
-        let addr = Address::Ipv6(net::SocketAddrV6::new(net::Ipv6Addr::new(0x2001, 0x0db8, 0x85a3, 0x0000, 0x0000, 0x8a2e, 0x0370, 0x7334), 4142, 0, 0));
-        let bytes = vec![1, 0x20, 0x01, 0x0d, 0xb8, 0x85, 0xa3, 0x00, 0x00, 0x00, 0x00, 0x8a, 0x2e, 0x03, 0x70, 0x73, 0x34, 0x10, 0x2E ];
+        let addr = Address::Ipv6(net::SocketAddrV6::new(
+            net::Ipv6Addr::new(
+                0x2001, 0x0db8, 0x85a3, 0x0000, 0x0000, 0x8a2e, 0x0370, 0x7334,
+            ),
+            4142,
+            0,
+            0,
+        ));
+        let bytes = vec![
+            1, 0x20, 0x01, 0x0d, 0xb8, 0x85, 0xa3, 0x00, 0x00, 0x00, 0x00, 0x8a, 0x2e, 0x03, 0x70,
+            0x73, 0x34, 0x10, 0x2E,
+        ];
         assert_eq!(serialize(&addr), bytes);
         assert_eq!(deserialize::<Address>(&bytes).unwrap(), addr);
     }
 
     #[test]
     fn address_test_onion() {
-        let addr = Address::OnionV3(*b"jamie22ezawwi5r3o7lrgsno43jj7vq5en74czuw6wfmjzkhjjryxnid", 9150);
-        let bytes = vec![2, 106, 97, 109, 105, 101, 50, 50, 101, 122, 97, 119, 119, 105, 53, 114, 51, 111, 55, 108, 114, 103, 115, 110, 111, 52, 51, 106, 106, 55, 118, 113, 53, 101, 110, 55, 52, 99, 122, 117, 119, 54, 119, 102, 109, 106, 122, 107, 104, 106, 106, 114, 121, 120, 110, 105, 100, 35, 190];
+        let addr = Address::OnionV3(
+            *b"jamie22ezawwi5r3o7lrgsno43jj7vq5en74czuw6wfmjzkhjjryxnid",
+            9150,
+        );
+        let bytes = vec![
+            2, 106, 97, 109, 105, 101, 50, 50, 101, 122, 97, 119, 119, 105, 53, 114, 51, 111, 55,
+            108, 114, 103, 115, 110, 111, 52, 51, 106, 106, 55, 118, 113, 53, 101, 110, 55, 52, 99,
+            122, 117, 119, 54, 119, 102, 109, 106, 122, 107, 104, 106, 106, 114, 121, 120, 110,
+            105, 100, 35, 190,
+        ];
         assert_eq!(serialize(&addr), bytes);
         assert_eq!(deserialize::<Address>(&bytes).unwrap(), addr);
     }
@@ -1507,22 +1513,34 @@ mod test {
     #[test]
     fn version_msg_test() {
         let msg = Message::Version(VersionMessage {
-            version: Version { major: 1, minor: 2, patch: 4},
+            version: Version {
+                major: 1,
+                minor: 2,
+                patch: 4,
+            },
             time: 1615562102,
             nonce: [0, 1, 2, 3, 4, 5, 6, 7],
             scan_blocks: vec![
                 ScanBlock {
                     currency: Currency::Btc,
-                    version: Version { major: 1, minor: 2, patch: 4},
+                    version: Version {
+                        major: 1,
+                        minor: 2,
+                        patch: 4,
+                    },
                     scan_height: 674299,
                     height: 300000,
                 },
                 ScanBlock {
                     currency: Currency::Ergo,
-                    version: Version { major: 4, minor: 1, patch: 0},
+                    version: Version {
+                        major: 4,
+                        minor: 1,
+                        patch: 0,
+                    },
                     scan_height: 374299,
                     height: 200000,
-                }
+                },
             ],
         });
         let bytes = Vec::from_hex("00330100200476854b60000000000001020304050607020001002004fefb490a00fee09304000200001010fe1bb60500fe400d0300").unwrap();
@@ -1533,19 +1551,28 @@ mod test {
     #[test]
     fn version_msg_test_failed_version() {
         let msg = Message::Version(VersionMessage {
-            version: Version { major: 2, minor: 0, patch: 0},
+            version: Version {
+                major: 2,
+                minor: 0,
+                patch: 0,
+            },
             time: 1617118704,
             nonce: [25, 218, 220, 43, 225, 52, 200, 125],
-            scan_blocks: vec![
-                ScanBlock {
-                    currency: Currency::Btc,
-                    version: Version { major: 1, minor: 0, patch: 0},
-                    scan_height: 677013,
-                    height: 677013,
+            scan_blocks: vec![ScanBlock {
+                currency: Currency::Btc,
+                version: Version {
+                    major: 1,
+                    minor: 0,
+                    patch: 0,
                 },
-            ],
+                scan_height: 677013,
+                height: 677013,
+            }],
         });
-        let bytes = Vec::from_hex("002400000008f04563600000000019dadc2be134c87d010000000004fe95540a00fe95540a00").unwrap();
+        let bytes = Vec::from_hex(
+            "002400000008f04563600000000019dadc2be134c87d010000000004fe95540a00fe95540a00",
+        )
+        .unwrap();
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
         assert_eq!(serialize(&msg), bytes);
     }
@@ -1618,10 +1645,7 @@ mod test {
 
     impl Encodable for Header {
         #[inline]
-        fn consensus_encode<S: io::Write>(
-            &self,
-            mut s: S,
-        ) -> Result<usize, io::Error> {
+        fn consensus_encode<S: io::Write>(&self, mut s: S) -> Result<usize, io::Error> {
             let mut len = 0;
             len += VarInt(self.message_id as u64).consensus_encode(&mut s)?;
             len += VarInt(self.message_length).consensus_encode(&mut s)?;
@@ -1641,7 +1665,11 @@ mod test {
             let mut buf = vec![0; len as usize];
             d.read_exact(&mut buf)?;
 
-            Ok(Header{ message_id: id, message_length: len, message_payload: buf })
+            Ok(Header {
+                message_id: id,
+                message_length: len,
+                message_payload: buf,
+            })
         }
     }
 
@@ -1694,20 +1722,26 @@ mod test {
     #[test]
     fn fee_resp_test() {
         let msg = Message::Fee(vec![
-                FeeResp::Btc((Currency::Btc, FeeBtc {
+            FeeResp::Btc((
+                Currency::Btc,
+                FeeBtc {
                     fast_conserv: 4,
                     fast_econom: 8,
                     moderate_conserv: 15,
                     moderate_econom: 16,
                     cheap_conserv: 23,
                     cheap_econom: 42,
-                })),
-                FeeResp::Other((Currency::Dash, FeeOther {
+                },
+            )),
+            FeeResp::Other((
+                Currency::Dash,
+                FeeOther {
                     fast: 4,
                     moderate: 8,
                     cheap: 15,
-                }))
-            ]);
+                },
+            )),
+        ]);
         let bytes = Vec::from_hex("080c020004080f10172a0c04080f").unwrap();
         assert_eq!(serialize(&msg), bytes);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
@@ -1724,10 +1758,21 @@ mod test {
     #[test]
     fn peer_resp_test() {
         let msg = Message::Peers(vec![
-              Address::Ipv4(net::SocketAddrV4::new(net::Ipv4Addr::new(127, 0, 0, 1), 8333))
-            , Address::Ipv6(net::SocketAddrV6::new(net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1), 8333, 0, 0))
-            , Address::OnionV3(*b"jamie22ezawwi5r3o7lrgsno43jj7vq5en74czuw6wfmjzkhjjryxnid", 9150)
-            ]);
+            Address::Ipv4(net::SocketAddrV4::new(
+                net::Ipv4Addr::new(127, 0, 0, 1),
+                8333,
+            )),
+            Address::Ipv6(net::SocketAddrV6::new(
+                net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1),
+                8333,
+                0,
+                0,
+            )),
+            Address::OnionV3(
+                *b"jamie22ezawwi5r3o7lrgsno43jj7vq5en74czuw6wfmjzkhjjryxnid",
+                9150,
+            ),
+        ]);
         let bytes = Vec::from_hex("065603007f000001208d0100000000000000000000000000000001208d026a616d69653232657a617777693572336f376c7267736e6f34336a6a37767135656e3734637a75773677666d6a7a6b686a6a7279786e696423be").unwrap();
         assert_eq!(serialize(&msg), bytes);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
@@ -1736,15 +1781,15 @@ mod test {
     #[test]
     fn rates_req_test() {
         let msg = Message::GetRates(vec![
-                RateReq {
-                    currency: Currency::Btc,
-                    fiats: vec![Fiat::Usd, Fiat::Rub],
-                },
-                RateReq {
-                    currency: Currency::Dash,
-                    fiats: vec![Fiat::Eur, Fiat::Rub],
-                },
-            ]);
+            RateReq {
+                currency: Currency::Btc,
+                fiats: vec![Fiat::Usd, Fiat::Rub],
+            },
+            RateReq {
+                currency: Currency::Dash,
+                fiats: vec![Fiat::Eur, Fiat::Rub],
+            },
+        ]);
         let bytes = Vec::from_hex("0d0902000200020c020102").unwrap();
         assert_eq!(serialize(&msg), bytes);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
@@ -1753,21 +1798,33 @@ mod test {
     #[test]
     fn rates_resp_test() {
         let msg = Message::Rates(vec![
-                RateResp {
-                    currency: Currency::Btc,
-                    rates: vec![
-                      FiatRate { fiat: Fiat::Usd, rate: Rate::new(65003_23) },
-                      FiatRate { fiat: Fiat::Rub, rate: Rate::new(350000_42) },
-                    ],
-                },
-                RateResp {
-                    currency: Currency::Dash,
-                    rates: vec![
-                      FiatRate { fiat: Fiat::Eur, rate: Rate::new(0_12) },
-                      FiatRate { fiat: Fiat::Rub, rate: Rate::new(0_01) },
-                    ],
-                },
-            ]);
+            RateResp {
+                currency: Currency::Btc,
+                rates: vec![
+                    FiatRate {
+                        fiat: Fiat::Usd,
+                        rate: Rate::new(65003_23),
+                    },
+                    FiatRate {
+                        fiat: Fiat::Rub,
+                        rate: Rate::new(350000_42),
+                    },
+                ],
+            },
+            RateResp {
+                currency: Currency::Dash,
+                rates: vec![
+                    FiatRate {
+                        fiat: Fiat::Eur,
+                        rate: Rate::new(0_12),
+                    },
+                    FiatRate {
+                        fiat: Fiat::Rub,
+                        rate: Rate::new(0_01),
+                    },
+                ],
+            },
+        ]);
         let bytes = Vec::from_hex("0e2902000200e32f63000000000002ea0e1602000000000c02010c00000000000000020100000000000000").unwrap();
         assert_eq!(serialize(&msg), bytes);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
@@ -1776,10 +1833,21 @@ mod test {
     #[test]
     fn peer_introduce_test() {
         let msg = Message::PeerIntroduce(vec![
-              Address::Ipv4(net::SocketAddrV4::new(net::Ipv4Addr::new(127, 0, 0, 1), 8333))
-            , Address::Ipv6(net::SocketAddrV6::new(net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1), 8333, 0, 0))
-            , Address::OnionV3(*b"jamie22ezawwi5r3o7lrgsno43jj7vq5en74czuw6wfmjzkhjjryxnid", 9150)
-            ]);
+            Address::Ipv4(net::SocketAddrV4::new(
+                net::Ipv4Addr::new(127, 0, 0, 1),
+                8333,
+            )),
+            Address::Ipv6(net::SocketAddrV6::new(
+                net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1),
+                8333,
+                0,
+                0,
+            )),
+            Address::OnionV3(
+                *b"jamie22ezawwi5r3o7lrgsno43jj7vq5en74czuw6wfmjzkhjjryxnid",
+                9150,
+            ),
+        ]);
         let bytes = Vec::from_hex("095603007f000001208d0100000000000000000000000000000001208d026a616d69653232657a617777693572336f376c7267736e6f34336a6a37767135656e3734637a75773677666d6a7a6b686a6a7279786e696423be").unwrap();
         assert_eq!(serialize(&msg), bytes);
         assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
@@ -1802,10 +1870,10 @@ mod test {
     }
 
     #[test]
-    fn full_filter_test(){
+    fn full_filter_test() {
         let mut rng = rand::thread_rng();
         for _ in 0..100 {
-            let mut f : Vec<u8> = Vec::new();
+            let mut f: Vec<u8> = Vec::new();
             let n = rng.gen_range(0..1024);
             (0..n).for_each(|_| {
                 f.push(rng.gen());
@@ -1822,7 +1890,7 @@ mod test {
     }
 
     #[test]
-    fn get_mem_filters_test(){
+    fn get_mem_filters_test() {
         let msg = Message::GetMemFilters;
         let bytes = Vec::from_hex("12").unwrap();
         assert_eq!(serialize(&msg), bytes);
@@ -1830,20 +1898,20 @@ mod test {
     }
 
     #[test]
-    fn mem_filters_test(){
+    fn mem_filters_test() {
         let mut rng = rand::thread_rng();
         for _ in 0..10 {
-            let mut fps : Vec<FilterPrefixPair> = Vec::new();
+            let mut fps: Vec<FilterPrefixPair> = Vec::new();
             let n = rng.gen_range(0..1024);
-            (0..n).for_each(|_|{
+            (0..n).for_each(|_| {
                 let prefix = TxPrefix(rng.gen());
                 let m = rng.gen_range(0..1024);
-                let mut f : Vec<u8> = Vec::with_capacity(m);
+                let mut f: Vec<u8> = Vec::with_capacity(m);
                 (0..m).for_each(|_| {
                     f.push(rng.gen());
                 });
                 let filter = MemFilter(f);
-                let fp = FilterPrefixPair{prefix, filter};
+                let fp = FilterPrefixPair { prefix, filter };
                 fps.push(fp)
             });
             let msg = Message::MemFilters(fps);
@@ -1852,43 +1920,136 @@ mod test {
         }
 
         let mut fpairs = vec![
-            FilterPrefixPair{prefix: TxPrefix([8,192]),     filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([18, 192]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([54, 192]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([195, 192]),  filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([9, 128]),    filter: MemFilter(Vec::from_hex("022d7f2b50e000").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([248, 0]),    filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([72, 64]),    filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([136, 64]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([10, 0]),     filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([110, 64]),   filter: MemFilter(Vec::from_hex("031b48714c5a3d93d0").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([209, 192]),  filter: MemFilter(Vec::from_hex("02a49bfc5e31c0").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([121, 64]),   filter: MemFilter(Vec::from_hex("0189ece0").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([231, 64]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([13, 0]),     filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([39, 0]),     filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([213, 192]),  filter: MemFilter(Vec::from_hex("039776c95c592b27d0").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([98, 128]),   filter: MemFilter(Vec::from_hex("01982900").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([171, 128]),  filter: MemFilter(Vec::from_hex("014f0dd0").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([247, 0]),    filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([39, 128]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([113, 64]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([150, 192]),  filter: MemFilter(Vec::from_hex("030a2d1d7494236508").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([95, 0]),     filter: MemFilter(Vec::from_hex("032704d4082c545300").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([181, 128]),  filter: MemFilter(Vec::from_hex("031ddc812f62d786d8").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([202, 0]),    filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([104, 192]),  filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([201, 64]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([31, 128]),   filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([29, 0]),     filter: MemFilter(Vec::from_hex("00").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([114, 192]),  filter: MemFilter(Vec::from_hex("0240f91b4f8b80").unwrap())},
-            FilterPrefixPair{prefix: TxPrefix([162, 64]),   filter: MemFilter(Vec::from_hex("0253954696ad").unwrap())},
+            FilterPrefixPair {
+                prefix: TxPrefix([8, 192]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([18, 192]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([54, 192]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([195, 192]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([9, 128]),
+                filter: MemFilter(Vec::from_hex("022d7f2b50e000").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([248, 0]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([72, 64]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([136, 64]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([10, 0]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([110, 64]),
+                filter: MemFilter(Vec::from_hex("031b48714c5a3d93d0").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([209, 192]),
+                filter: MemFilter(Vec::from_hex("02a49bfc5e31c0").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([121, 64]),
+                filter: MemFilter(Vec::from_hex("0189ece0").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([231, 64]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([13, 0]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([39, 0]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([213, 192]),
+                filter: MemFilter(Vec::from_hex("039776c95c592b27d0").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([98, 128]),
+                filter: MemFilter(Vec::from_hex("01982900").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([171, 128]),
+                filter: MemFilter(Vec::from_hex("014f0dd0").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([247, 0]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([39, 128]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([113, 64]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([150, 192]),
+                filter: MemFilter(Vec::from_hex("030a2d1d7494236508").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([95, 0]),
+                filter: MemFilter(Vec::from_hex("032704d4082c545300").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([181, 128]),
+                filter: MemFilter(Vec::from_hex("031ddc812f62d786d8").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([202, 0]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([104, 192]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([201, 64]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([31, 128]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([29, 0]),
+                filter: MemFilter(Vec::from_hex("00").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([114, 192]),
+                filter: MemFilter(Vec::from_hex("0240f91b4f8b80").unwrap()),
+            },
+            FilterPrefixPair {
+                prefix: TxPrefix([162, 64]),
+                filter: MemFilter(Vec::from_hex("0253954696ad").unwrap()),
+            },
         ];
         fpairs.sort(); // Input hex was sorted
         let msg = Message::MemFilters(fpairs);
         let bytes = Vec::from_hex("13c51f08c00100098007022d7f2b50e0000a0001000d00010012c001001d0001001f800100270001002780010036c00100484001005f0009032704d4082c5453006280040198290068c001006e4009031b48714c5a3d93d07140010072c0070240f91b4f8b807940040189ece08840010096c009030a2d1d7494236508a240060253954696adab8004014f0dd0b58009031ddc812f62d786d8c3c00100c9400100ca000100d1c00702a49bfc5e31c0d5c009039776c95c592b27d0e7400100f7000100f8000100").unwrap();
-        if let Message::MemFilters(msg2) = deserialize::<Message>(&bytes).unwrap(){
-            for FilterPrefixPair{prefix, filter} in msg2.iter(){
+        if let Message::MemFilters(msg2) = deserialize::<Message>(&bytes).unwrap() {
+            for FilterPrefixPair { prefix, filter } in msg2.iter() {
                 println!("{}:{}", prefix, filter.0.to_hex());
             }
         }
@@ -1896,47 +2057,59 @@ mod test {
     }
 
     #[test]
-    fn get_mempool_test(){
+    fn get_mempool_test() {
         let mut rng = rand::thread_rng();
         for _ in 0..100 {
-            let mut prefs : Vec<[u8;2]> = Vec::new();
+            let mut prefs: Vec<[u8; 2]> = Vec::new();
             let n = rng.gen_range(0..1024);
             (0..n).for_each(|_| {
                 prefs.push(rng.gen());
             });
             let msg = Message::GetMempool(prefs.iter().map(|p| TxPrefix(p.clone())).collect());
             let bytes = serialize(&msg);
-            assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg, "Failed to deserialize random getmempool");
+            assert_eq!(
+                deserialize::<Message>(&bytes).unwrap(),
+                msg,
+                "Failed to deserialize random getmempool"
+            );
         }
 
-        let msg = Message::GetMempool(vec![TxPrefix([72,12])]);
+        let msg = Message::GetMempool(vec![TxPrefix([72, 12])]);
         let bytes = Vec::from_hex("140301480c").unwrap();
-        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg, "Deserialized msg not equal to a specific one");
+        assert_eq!(
+            deserialize::<Message>(&bytes).unwrap(),
+            msg,
+            "Deserialized msg not equal to a specific one"
+        );
     }
 
     #[test]
-    fn mempool_chunk_test(){
+    fn mempool_chunk_test() {
         let mut rng = rand::thread_rng();
         for _ in 0..100 {
             let prefix = TxPrefix(rng.gen());
             let amount: u32 = rng.gen_range(1..102);
             let mut txs: Vec<Vec<u8>> = Vec::new();
-            (0..amount).for_each(|_|{
+            (0..amount).for_each(|_| {
                 let l = rng.gen_range(1..256);
                 let mut tx = Vec::new();
-                (0..l).for_each(|_|{tx.push(rng.gen())});
+                (0..l).for_each(|_| tx.push(rng.gen()));
                 txs.push(tx);
             });
-            let msg = Message::MempoolChunk(MempoolChunkResp{prefix, txs});
+            let msg = Message::MempoolChunk(MempoolChunkResp { prefix, txs });
             let bytes = serialize(&msg);
             assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg);
         }
 
         let tx = Vec::from_hex("02000000000101261560a27330e73b46351ac349ff35136f614d4dfdfb3a108fa85c140a1c61a901000000171600149fd77bca5b9369478c80dc5c5cc4101f7baf5a95feffffff0254c410000000000017a914ba906b3da20467de78552d0c089e3754f49f62688740420f000000000017a9140f912a6fc7ba91305934dba0ef566cbfc62fd2218702473044022045d75032c9f3806939ff10ffd79a040bdcbece2f90cb1dc95e3a3b7cf109da1e022012a37cc4fee1ff9ae19c6adf7d0bc84a122b5ce33d5c43bebff52a6796d512340121025609c093b93e3d4a003ebb0ec8e58700d12e6f05c0c1096f18ba3ef8ff931fca260d1b00").unwrap();
-        let txs = vec![tx;6];
-        let prefix = TxPrefix([9,128]);
+        let txs = vec![tx; 6];
+        let prefix = TxPrefix([9, 128]);
         let msg = Message::MempoolChunk(MempoolChunkResp { prefix, txs });
         let bytes = Vec::from_hex("15fd1c010980061f8b0800000000000003fbcec400048c8c6aa2098b8a0d9e5bbb994a1df6fc6f2a9c9fe8ebfbf7b79540ff8a18112e99c4958c4055e2620c22f3af579f8a9e9ce9ded3702726e688807cf5faa8a9fffeffffcf14724400641283f84a915d13b26d17b1a4dfab08d5e5e198671ef2657e5246bb83133f4c9e7fa256fef15d130d224d6e2f781f96b3ff98fe25c576267703172605d7eb0146273f37645afe17f87f7d160bf79d7de7f4279c963d1967655df391f3961c9382d0e29a23ff1efe9ff5704ed6fd5aee135e42da318f6d639cf7edffaa953eedaa9009a3225318e781c93bed6cbd18ec76f39d78dace70512f9ff5c041ce7c895d763ffe4f963fa5c62bcdf07dd4dfa3fe1ef5f7a8bf8799bf015b13a09cd0050000").unwrap();
-        assert_eq!(deserialize::<Message>(&bytes).unwrap(), msg, "Deserialized msg not equal to a specific one");
+        assert_eq!(
+            deserialize::<Message>(&bytes).unwrap(),
+            msg,
+            "Deserialized msg not equal to a specific one"
+        );
     }
 }
